@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+/*
+ * Brand tokens are injected as CSS variables from theme/tokens.ts by the root
+ * layout (see app/layout.tsx). No hex codes live in components — they read these
+ * variables (or the Tailwind theme aliases below). To rebrand, edit theme/tokens.ts.
+ */
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-text-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-text: var(--accent-text);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --radius-brand: var(--radius);
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+}
+
+* {
+  border-color: var(--border);
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+/* Rendered-markdown styling for stage outputs */
+.prose-stage {
+  color: var(--text);
+  line-height: 1.6;
+}
+.prose-stage h1,
+.prose-stage h2,
+.prose-stage h3 {
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
+  color: var(--text);
+  font-weight: 600;
+  margin-top: 1.4em;
+  margin-bottom: 0.5em;
+  line-height: 1.25;
+}
+.prose-stage h1 { font-size: 1.6rem; }
+.prose-stage h2 { font-size: 1.3rem; }
+.prose-stage h3 { font-size: 1.1rem; }
+.prose-stage p { margin: 0.7em 0; }
+.prose-stage ul,
+.prose-stage ol { margin: 0.7em 0; padding-left: 1.4em; }
+.prose-stage li { margin: 0.3em 0; }
+.prose-stage ul { list-style: disc; }
+.prose-stage ol { list-style: decimal; }
+.prose-stage strong { color: var(--text); font-weight: 600; }
+.prose-stage a { color: var(--accent); text-decoration: underline; }
+.prose-stage code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
+}
+.prose-stage pre {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1em;
+  overflow-x: auto;
+  margin: 1em 0;
+}
+.prose-stage pre code { border: none; background: none; padding: 0; }
+.prose-stage blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 1em;
+  color: var(--text-muted);
+  margin: 1em 0;
+}
+.prose-stage hr { border: none; border-top: 1px solid var(--border); margin: 1.5em 0; }
+.prose-stage table { border-collapse: collapse; margin: 1em 0; width: 100%; }
+.prose-stage th,
+.prose-stage td { border: 1px solid var(--border); padding: 0.5em 0.75em; text-align: left; }

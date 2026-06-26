@@ -1,0 +1,31 @@
+import { NextResponse } from "next/server";
+import { runStage } from "@/lib/skill-executor";
+import { getOperatorId } from "@/lib/auth";
+
+export const runtime = "nodejs";
+export const maxDuration = 300;
+
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ id: string; stageKey: string }> },
+) {
+  const { id, stageKey } = await params;
+  let feedback: string | undefined;
+  try {
+    const body = await req.json();
+    feedback = typeof body?.feedback === "string" ? body.feedback : undefined;
+  } catch {
+    // no body is fine
+  }
+
+  const operatorId = await getOperatorId();
+  try {
+    const result = await runStage(id, stageKey, feedback, operatorId);
+    return NextResponse.json(result, { status: result.ok ? 200 : 500 });
+  } catch (err) {
+    return NextResponse.json(
+      { ok: false, error: err instanceof Error ? err.message : String(err) },
+      { status: 400 },
+    );
+  }
+}
