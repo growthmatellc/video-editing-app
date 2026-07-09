@@ -21,10 +21,13 @@ function getDb(): PostgresJsDatabase<typeof schema> {
     globalForDb._pg ?? postgres(connectionString, { prepare: false, max: 5 });
   const instance = drizzle(queryClient, { schema });
 
-  if (process.env.NODE_ENV !== "production") {
-    globalForDb._pg = queryClient;
-    globalForDb._db = instance;
-  }
+  // Cache the pool + drizzle instance in EVERY environment. On Vercel the `db`
+  // proxy calls getDb() on every property access; without this cache each access
+  // would open a fresh postgres() pool that never closes, exhausting Neon's
+  // connection limit and 500-ing the app. Reusing the singleton is exactly what
+  // serverless/Fluid needs (instances are reused across requests).
+  globalForDb._pg = queryClient;
+  globalForDb._db = instance;
   return instance;
 }
 
