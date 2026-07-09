@@ -55,6 +55,7 @@ export async function renderDeck(
   const p = buildPalette(deck);
 
   for (const slide of deck.slides) {
+    if (!slide || typeof slide !== "object") continue; // skip null/garbage entries
     const s = pptx.addSlide();
     s.background = { color: p.bg };
     drawSlide(s, slide, p, deck.brandKit);
@@ -112,11 +113,12 @@ function drawSlide(s: PptxSlide, slide: Slide, p: Palette, bk?: BrandKit) {
     case "framework": {
       if (slide.heading)
         s.addText(slide.heading, { ...titleOpts, x: PAD, y: 0.7, w: contentW, h: 1, fontSize: 30 });
-      const rows = slide.steps.map((st) => [
-        { text: st.number, options: { color: p.accent, bold: true, fontFace: p.displayFont, fontSize: 18, valign: "middle" as const } },
-        { text: st.label, options: { color: p.text, fontFace: p.bodyFont, fontSize: 18, valign: "middle" as const } },
+      const rows = (slide.steps ?? []).map((st) => [
+        { text: String(st?.number ?? ""), options: { color: p.accent, bold: true, fontFace: p.displayFont, fontSize: 18, valign: "middle" as const } },
+        { text: String(st?.label ?? ""), options: { color: p.text, fontFace: p.bodyFont, fontSize: 18, valign: "middle" as const } },
       ]);
-      s.addTable(rows, { x: PAD, y: 1.9, w: contentW, colW: [1.2, contentW - 1.2], rowH: 0.6, border: { type: "none" } });
+      if (rows.length)
+        s.addTable(rows, { x: PAD, y: 1.9, w: contentW, colW: [1.2, contentW - 1.2], rowH: 0.6, border: { type: "none" } });
       break;
     }
 
@@ -128,26 +130,23 @@ function drawSlide(s: PptxSlide, slide: Slide, p: Palette, bk?: BrandKit) {
 
     case "compare": {
       const colW = (contentW - 0.6) / 2;
-      s.addText(slide.leftLabel, { ...titleOpts, x: PAD, y: 0.8, w: colW, h: 0.8, fontSize: 22, color: p.muted });
-      s.addText(slide.rightLabel, { ...titleOpts, x: PAD + colW + 0.6, y: 0.8, w: colW, h: 0.8, fontSize: 22, color: p.accent });
-      s.addText(
-        slide.leftItems.map((t) => ({ text: t, options: { bullet: true, fontSize: 18, color: p.text, fontFace: p.bodyFont, paraSpaceAfter: 8 } })),
-        { x: PAD, y: 1.8, w: colW, h: 5 },
-      );
-      s.addText(
-        slide.rightItems.map((t) => ({ text: t, options: { bullet: true, fontSize: 18, color: p.text, fontFace: p.bodyFont, paraSpaceAfter: 8 } })),
-        { x: PAD + colW + 0.6, y: 1.8, w: colW, h: 5 },
-      );
+      s.addText(String(slide.leftLabel ?? ""), { ...titleOpts, x: PAD, y: 0.8, w: colW, h: 0.8, fontSize: 22, color: p.muted });
+      s.addText(String(slide.rightLabel ?? ""), { ...titleOpts, x: PAD + colW + 0.6, y: 0.8, w: colW, h: 0.8, fontSize: 22, color: p.accent });
+      const leftItems = (slide.leftItems ?? []).map((t) => ({ text: String(t ?? ""), options: { bullet: true, fontSize: 18, color: p.text, fontFace: p.bodyFont, paraSpaceAfter: 8 } }));
+      const rightItems = (slide.rightItems ?? []).map((t) => ({ text: String(t ?? ""), options: { bullet: true, fontSize: 18, color: p.text, fontFace: p.bodyFont, paraSpaceAfter: 8 } }));
+      if (leftItems.length) s.addText(leftItems, { x: PAD, y: 1.8, w: colW, h: 5 });
+      if (rightItems.length) s.addText(rightItems, { x: PAD + colW + 0.6, y: 1.8, w: colW, h: 5 });
       break;
     }
 
     case "offerStack": {
-      s.addText(slide.heading, { ...titleOpts, x: PAD, y: 0.7, w: contentW, h: 1, fontSize: 30 });
-      const rows = slide.items.map((it) => [
-        { text: it.label, options: { color: p.text, fontFace: p.bodyFont, fontSize: 18, valign: "middle" as const } },
-        { text: it.value ?? "", options: { color: p.accent, bold: true, align: "right" as const, fontFace: p.displayFont, fontSize: 18, valign: "middle" as const } },
+      s.addText(String(slide.heading ?? ""), { ...titleOpts, x: PAD, y: 0.7, w: contentW, h: 1, fontSize: 30 });
+      const rows = (slide.items ?? []).map((it) => [
+        { text: String(it?.label ?? ""), options: { color: p.text, fontFace: p.bodyFont, fontSize: 18, valign: "middle" as const } },
+        { text: String(it?.value ?? ""), options: { color: p.accent, bold: true, align: "right" as const, fontFace: p.displayFont, fontSize: 18, valign: "middle" as const } },
       ]);
-      s.addTable(rows, { x: PAD, y: 1.9, w: contentW, colW: [contentW - 2.6, 2.6], rowH: 0.55, border: { type: "none" } });
+      if (rows.length)
+        s.addTable(rows, { x: PAD, y: 1.9, w: contentW, colW: [contentW - 2.6, 2.6], rowH: 0.55, border: { type: "none" } });
       break;
     }
 
