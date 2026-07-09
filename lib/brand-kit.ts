@@ -116,7 +116,7 @@ function collectColors(text: string): Map<string, number> {
   return counts;
 }
 
-function findColors(text: string): { primary?: string; accent?: string } {
+function findColors(text: string): { primary?: string; accent?: string; palette: string[] } {
   // Explicit brand signal wins for primary, if present and not neutral.
   const themeColor = normalizeHex(
     firstMatch(text, /<meta[^>]+name=["']theme-color["'][^>]+content=["']([^"']+)["']/i),
@@ -141,6 +141,111 @@ function findColors(text: string): { primary?: string; accent?: string } {
     });
   }
   accent = accent ?? ranked.find((h) => h !== primary) ?? primary;
+
+  return { primary, accent, palette: ranked.slice(0, 8) };
+}
+
+// --- Manual color overrides --------------------------------------------------
+// Frequency-based detection can't tell visually-dominant from merely-frequent,
+// so the operator can name colors in the feedback box. Supports hex (#5BE1D6),
+// color names (teal, coral, navy…), and "primary <x> accent <y>" labels.
+
+const NAMED_COLORS: Record<string, RGB> = {
+  teal: { r: 20, g: 184, b: 166 },
+  turquoise: { r: 64, g: 224, b: 208 },
+  cyan: { r: 6, g: 182, b: 212 },
+  aqua: { r: 0, g: 200, b: 200 },
+  navy: { r: 12, g: 51, b: 91 },
+  blue: { r: 37, g: 99, b: 235 },
+  coral: { r: 255, g: 127, b: 80 },
+  salmon: { r: 250, g: 128, b: 114 },
+  peach: { r: 255, g: 176, b: 124 },
+  red: { r: 220, g: 38, b: 38 },
+  orange: { r: 249, g: 115, b: 22 },
+  gold: { r: 212, g: 175, b: 55 },
+  amber: { r: 245, g: 158, b: 11 },
+  yellow: { r: 234, g: 179, b: 8 },
+  green: { r: 34, g: 197, b: 94 },
+  emerald: { r: 16, g: 185, b: 129 },
+  lime: { r: 132, g: 204, b: 22 },
+  purple: { r: 139, g: 92, b: 246 },
+  violet: { r: 124, g: 58, b: 237 },
+  magenta: { r: 217, g: 70, b: 239 },
+  pink: { r: 236, g: 72, b: 153 },
+  brown: { r: 146, g: 64, b: 14 },
+  black: { r: 17, g: 17, b: 20 },
+  white: { r: 245, g: 245, b: 244 },
+  gray: { r: 107, g: 114, b: 128 },
+  grey: { r: 107, g: 114, b: 128 },
+};
+
+function dist(a: RGB, b: RGB): number {
+  return Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2);
+}
+
+function saturation({ r, g, b }: RGB): number {
+  const max = Math.max(r, g, b) / 255;
+  const min = Math.min(r, g, b) / 255;
+  if (max === min) return 0;
+  const l = (max + min) / 2;
+  const d = max - min;
+  return l > 0.5 ? d / (2 - max - min) : d / (max + min);
+}
+
+// Resolve a token (hex or color name) to a hex. For names, snap to the closest
+// color actually on the site (from `palette`): match by HUE for chromatic names
+// (so "teal" → the site's teal, not a nearby blue) and by RGB for neutrals.
+// Falls back to the reference shade if nothing on the page is close.
+function resolveColorToken(token: string, palette: string[]): string | undefined {
+  const t = token.trim().toLowerCase();
+  if (/^#[0-9a-f]{3,6}$/.test(t)) return normalizeHex(t);
+  const ref = NAMED_COLORS[t];
+  if (!ref) return undefined;
+
+  let best: string | undefined;
+  let bestD = Infinity;
+  const chromatic = saturation(ref) > 0.15;
+  for (const p of palette) {
+    const rgb = hexToRgb(p);
+    if (!rgb) continue;
+    const d = chromatic ? hueDistance(rgb, ref) : dist(rgb, ref);
+    if (d < bestD) {
+      bestD = d;
+      best = p;
+    }
+  }
+  const threshold = chromatic ? 45 : 60;
+  return best && bestD < threshold ? best : rgbToHex(ref);
+}
+
+function grabLabeled(text: string, label: string, palette: string[]): string | undefined {
+  const m = text.match(
+    new RegExp(`${label}(?:\\s+colou?r)?\\s*[:=]?\\s*(#[0-9a-f]{3,6}|[a-z]+)`, "i"),
+  );
+  return m ? resolveColorToken(m[1], palette) : undefined;
+}
+
+export function parseColorOverrides(
+  feedback: string | undefined,
+  palette: string[] = [],
+): { primary?: string; accent?: string } {
+  if (!feedback) return {};
+  const t = feedback.toLowerCase();
+
+  let primary = grabLabeled(t, "primary", palette);
+  let accent = grabLabeled(t, "accent", palette);
+
+  // No labels? Take colors in order — first is primary, second is accent.
+  if (!primary && !accent) {
+    const tokens = (t.match(/#[0-9a-f]{6}\b|#[0-9a-f]{3}\b|[a-z]+/g) ?? []).filter(
+      (tok) => tok.startsWith("#") || tok in NAMED_COLORS,
+    );
+    const resolved = tokens
+      .map((tok) => resolveColorToken(tok, palette))
+      .filter((x): x is string => !!x);
+    primary = resolved[0];
+    accent = resolved[1];
+  }
 
   return { primary, accent };
 }
@@ -212,6 +317,7 @@ export async function scrapeBrandKit(url: string): Promise<BrandKit> {
     return {
       primaryColor: colors.primary,
       accentColor: colors.accent,
+      palette: colors.palette,
       displayFont: fonts.display,
       bodyFont: fonts.body,
       logoUrl: findLogo(html, target),
@@ -225,6 +331,10 @@ export async function scrapeBrandKit(url: string): Promise<BrandKit> {
 
 export function brandKitToMarkdown(bk: BrandKit): string {
   const row = (k: string, v?: string) => `- **${k}:** ${v ?? "[PLACEHOLDER]"}`;
+  const palette =
+    bk.palette && bk.palette.length
+      ? `- **Detected palette:** ${bk.palette.join(", ")}`
+      : `- **Detected palette:** (none)`;
   return [
     `# Brand Kit`,
     ``,
@@ -232,11 +342,14 @@ export function brandKitToMarkdown(bk: BrandKit): string {
     ``,
     row("Primary color", bk.primaryColor),
     row("Accent color", bk.accentColor),
+    palette,
     row("Display font", bk.displayFont),
     row("Body font", bk.bodyFont),
     row("Logo", bk.logoUrl),
     ``,
-    `Confirm or correct these before generating the slide deck. The deck and any`,
-    `brand-matched pages read from this kit.`,
+    `**Wrong colors?** Auto-detect picks the most-used color, which isn't always the`,
+    `one you see first. Put the color you want in the feedback box and re-run — e.g.`,
+    "`primary teal` or `primary #5BE1D6 accent navy`. You can use a hex code or a name",
+    `(teal, coral, navy, gold…); names snap to the closest color detected on the site.`,
   ].join("\n");
 }

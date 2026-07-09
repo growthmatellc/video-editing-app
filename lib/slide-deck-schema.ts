@@ -6,6 +6,7 @@ export interface BrandKit {
   logoUrl?: string;
   sourceUrl?: string;
   scrapedAt?: string;
+  palette?: string[]; // all detected brand-color candidates (hex), most-frequent first
 }
 
 export type Slide =

@@ -21,7 +21,7 @@ import {
   type ProjectWithStages,
 } from "./project-store";
 import type { Client } from "./db/schema";
-import { scrapeBrandKit, brandKitToMarkdown, extractUrl } from "./brand-kit";
+import { scrapeBrandKit, brandKitToMarkdown, extractUrl, parseColorOverrides } from "./brand-kit";
 import {
   SLIDES_SYSTEM_PROMPT,
   isValidDeck,
@@ -280,13 +280,24 @@ async function runBrandKit(
   feedback: string | undefined,
   operatorId: string | null | undefined,
 ): Promise<RunResult> {
-  const url = extractUrl(feedback, data.intake?.rawText);
+  // Reuse the previously-scraped URL so a re-run with only a color override
+  // (e.g. "primary teal") still works without re-pasting the site URL.
+  const priorKit = (stageRow.outputMeta as { brandKit?: BrandKit } | null)?.brandKit;
+  const url = extractUrl(feedback, data.intake?.rawText) ?? priorKit?.sourceUrl;
   if (!url) {
     throw new Error(
       "No URL found. Paste the client's website URL into the feedback box and run again.",
     );
   }
-  const brandKit = await scrapeBrandKit(url);
+  const scraped = await scrapeBrandKit(url);
+
+  // Operator color overrides from the feedback box win over auto-detect.
+  const overrides = parseColorOverrides(feedback, scraped.palette);
+  const brandKit: BrandKit = {
+    ...scraped,
+    primaryColor: overrides.primary ?? scraped.primaryColor,
+    accentColor: overrides.accent ?? scraped.accentColor,
+  };
   const md = brandKitToMarkdown(brandKit);
 
   await archiveRevision(stageRow, feedback ?? null, operatorId ?? null);
