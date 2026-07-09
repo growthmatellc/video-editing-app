@@ -15,10 +15,12 @@ import {
   getProject,
   getStage,
   getSkill,
+  getClient,
   archiveRevision,
   saveStageOutput,
   type ProjectWithStages,
 } from "./project-store";
+import type { Client } from "./db/schema";
 import { scrapeBrandKit, brandKitToMarkdown, extractUrl } from "./brand-kit";
 import {
   SLIDES_SYSTEM_PROMPT,
@@ -55,6 +57,11 @@ export async function runStage(
   const stageRow = await getStage(projectId, stageKey);
   if (!stageRow) throw new Error(`Stage row missing: ${stageKey}`);
 
+  // Load the linked knowledge-base client (if any) once; its profile, style
+  // guide, and retired-term rules become locked context for every stage.
+  const client = data.project.clientSlug ? await getClient(data.project.clientSlug) : null;
+  const clientContext = client ? buildClientContext(client) : null;
+
   // Mark running.
   await saveStageOutput(stageRow.id, { status: "running" });
 
@@ -63,9 +70,9 @@ export async function runStage(
       return await runBrandKit(data, stageRow, feedback, operatorId);
     }
     if (stageKey === "webinar-slides") {
-      return await runSlides(data, def, stageRow, feedback, operatorId);
+      return await runSlides(data, def, stageRow, feedback, operatorId, clientContext);
     }
-    return await runProse(data, def, stageRow, feedback, operatorId);
+    return await runProse(data, def, stageRow, feedback, operatorId, clientContext);
   } catch (err) {
     // Restore a non-running status so the UI is not stuck.
     await saveStageOutput(stageRow.id, {
@@ -83,13 +90,25 @@ export async function runStage(
 
 // --- Prompt assembly ---------------------------------------------------------
 
-function buildSystem(skillMd: string, learningsMd: string, examplesMd: string) {
+function buildSystem(
+  skillMd: string,
+  learningsMd: string,
+  examplesMd: string,
+  kbSkillMd = "",
+) {
   const blocks: { text: string; cache?: boolean }[] = [];
   blocks.push({
     text: `You are an expert direct-response strategist and copywriter producing one deliverable in a live-webinar funnel. You build on the locked context you are given and never contradict it.\n\nVoice rules (always honor):\n${VOICE_RULES}`,
   });
   // Everything after the role line is cacheable (stable across re-runs).
   blocks.push({ text: skillMd, cache: true });
+  // GrowthMate craft skill(s) mapped to this stage (from growthmate-knowledge).
+  if (kbSkillMd.trim()) {
+    blocks.push({
+      text: `# GrowthMate craft standard for this deliverable (apply this method and quality bar)\n${kbSkillMd}`,
+      cache: true,
+    });
+  }
   if (learningsMd.trim()) {
     blocks.push({
       text: `# Overriding rules (learned corrections — these take precedence)\n${learningsMd}`,
@@ -124,9 +143,13 @@ function buildUser(
   def: StageDef,
   feedback: string | undefined,
   priorOutput: string | null,
+  clientContext: string | null,
 ): string {
   const sections: string[] = [];
   sections.push(`Client: ${data.project.clientName}`);
+  if (clientContext) {
+    sections.push(`\n${clientContext}`);
+  }
   sections.push(`\n# Client intake (source of truth)\n${data.intake?.rawText ?? "(none)"}`);
 
   const prior = priorApprovedContext(data);
@@ -151,6 +174,59 @@ function buildUser(
   return sections.join("\n");
 }
 
+/**
+ * Turn a knowledge-base client into a locked-context block: profile (info.json),
+ * banned phrases, style guide, and retired-terminology find/replace rules.
+ */
+function buildClientContext(client: Client): string {
+  const parts: string[] = [
+    `# Client context — LOCKED source of truth for ${client.displayName}\n` +
+      `This overrides anything generic. Match this client's brand, voice, offer naming, and mechanism exactly.`,
+  ];
+
+  if (client.infoJson) {
+    parts.push(
+      `## Client profile (info.json)\n\`\`\`json\n${JSON.stringify(client.infoJson, null, 2)}\n\`\`\``,
+    );
+    const banned = (client.infoJson as { banned_phrases?: unknown }).banned_phrases;
+    if (Array.isArray(banned) && banned.length) {
+      parts.push(
+        `## Banned phrases (never use these)\n${banned.map((b) => `- ${String(b)}`).join("\n")}`,
+      );
+    }
+  }
+
+  if (client.styleGuideMd && client.styleGuideMd.trim()) {
+    parts.push(
+      `## Style guide (voice, signoff, mechanism naming, structural preferences — honor every entry)\n${client.styleGuideMd.trim()}`,
+    );
+  }
+
+  const termRules = formatTermMappings(client.termMappingsJson);
+  if (termRules) {
+    parts.push(
+      `## Retired terminology (ALWAYS replace retired → current, never emit a retired term)\n${termRules}`,
+    );
+  }
+
+  return parts.join("\n\n");
+}
+
+function formatTermMappings(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const mappings = (raw as { mappings?: unknown }).mappings;
+  if (!Array.isArray(mappings) || mappings.length === 0) return null;
+  const lines = mappings
+    .map((m) => {
+      const e = m as { retired_term?: string; current_term?: string; context?: string };
+      if (!e.retired_term || !e.current_term) return null;
+      const ctx = e.context ? ` — ${e.context}` : "";
+      return `- "${e.retired_term}" → "${e.current_term}"${ctx}`;
+    })
+    .filter(Boolean);
+  return lines.length ? lines.join("\n") : null;
+}
+
 // --- Prose stages ------------------------------------------------------------
 
 async function runProse(
@@ -159,13 +235,14 @@ async function runProse(
   stageRow: Stage,
   feedback: string | undefined,
   operatorId: string | null | undefined,
+  clientContext: string | null,
 ): Promise<RunResult> {
   if (!def.skillKey) throw new Error(`Stage ${def.key} has no skill`);
   const skill = await getSkill(def.skillKey);
   if (!skill) throw new Error(`Skill not seeded: ${def.skillKey}. Run npm run seed:skills.`);
 
-  const system = buildSystem(skill.skillMd, skill.learningsMd, skill.examplesMd);
-  const baseUser = buildUser(data, def, feedback, stageRow.outputMd);
+  const system = buildSystem(skill.skillMd, skill.learningsMd, skill.examplesMd, skill.kbSkillMd);
+  const baseUser = buildUser(data, def, feedback, stageRow.outputMd, clientContext);
 
   let text: string;
   let score: GateScore | null = null;
@@ -234,9 +311,19 @@ async function runSlides(
   stageRow: Stage,
   feedback: string | undefined,
   operatorId: string | null | undefined,
+  clientContext: string | null,
 ): Promise<RunResult> {
-  const system = [{ text: SLIDES_SYSTEM_PROMPT, cache: true }];
-  const baseUser = buildUser(data, def, feedback, stageRow.outputMd);
+  const skill = await getSkill(def.skillKey ?? "webinar-slides");
+  const system = [
+    { text: SLIDES_SYSTEM_PROMPT, cache: true },
+    ...(skill?.kbSkillMd?.trim()
+      ? [{
+          text: `# GrowthMate slide-craft standard (apply this method and quality bar)\n${skill.kbSkillMd}`,
+          cache: true,
+        }]
+      : []),
+  ];
+  const baseUser = buildUser(data, def, feedback, stageRow.outputMd, clientContext);
 
   const { data: parsed } = await generateJson<SlideDeck>({
     system,

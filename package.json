@@ -10,7 +10,8 @@
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:migrate": "drizzle-kit migrate",
-    "seed:skills": "tsx scripts/seed-skills.ts"
+    "seed:skills": "tsx scripts/seed-skills.ts",
+    "sync:knowledge": "tsx scripts/sync-knowledge.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

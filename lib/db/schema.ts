@@ -23,11 +23,25 @@ export const stageStatus = pgEnum("stage_status", [
   "rejected",
 ]);
 
+// The client library, synced from the growthmate-knowledge repo (clients/<slug>/).
+// This is the DB mirror the app reads at runtime — the repo is the source of truth
+// but is not deployed to Vercel, so `npm run sync:knowledge` loads it into here.
+export const clients = pgTable("clients", {
+  slug: text("slug").primaryKey(),
+  displayName: text("display_name").notNull(),
+  vertical: text("vertical"),
+  infoJson: jsonb("info_json"), // the client's info.json, verbatim
+  styleGuideMd: text("style_guide_md").notNull().default(""), // style-guide.md
+  termMappingsJson: jsonb("term_mappings_json"), // term-mappings.json (retired terms)
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // One per client webinar funnel.
 export const projects = pgTable("projects", {
   id: text("id").primaryKey(),
   clientName: text("client_name").notNull(),
   slug: text("slug").notNull(),
+  clientSlug: text("client_slug"), // FK-by-convention into clients.slug; null = ad-hoc project
   status: projectStatus("status").notNull().default("active"),
   ownerId: text("owner_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -82,6 +96,10 @@ export const skills = pgTable("skills", {
   skillMd: text("skill_md").notNull(),
   learningsMd: text("learnings_md").notNull().default(""),
   examplesMd: text("examples_md").notNull().default(""),
+  // Craft-skill content folded in from growthmate-knowledge (see lib/knowledge-map.ts).
+  // Kept separate from skillMd so `seed:skills` (app instructions) and
+  // `sync:knowledge` (KB craft skills) own different columns and never clobber.
+  kbSkillMd: text("kb_skill_md").notNull().default(""),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -92,3 +110,5 @@ export type Stage = typeof stages.$inferSelect;
 export type NewStage = typeof stages.$inferInsert;
 export type Revision = typeof revisions.$inferSelect;
 export type Skill = typeof skills.$inferSelect;
+export type Client = typeof clients.$inferSelect;
+export type NewClient = typeof clients.$inferInsert;

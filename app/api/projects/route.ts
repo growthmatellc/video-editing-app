@@ -10,7 +10,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  let body: { clientName?: string; rawText?: string };
+  let body: { clientName?: string; rawText?: string; clientSlug?: string };
   try {
     body = await req.json();
   } catch {
@@ -19,11 +19,12 @@ export async function POST(req: Request) {
 
   const clientName = body.clientName?.trim();
   const rawText = body.rawText?.trim() ?? "";
+  const clientSlug = body.clientSlug?.trim() || null;
   if (!clientName) {
     return NextResponse.json({ error: "clientName is required" }, { status: 400 });
   }
 
   const ownerId = await getOperatorId();
-  const { id } = await createProject({ clientName, rawText, ownerId });
+  const { id } = await createProject({ clientName, rawText, clientSlug, ownerId });
   return NextResponse.json({ id }, { status: 201 });
 }

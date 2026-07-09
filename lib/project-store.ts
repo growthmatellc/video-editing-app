@@ -4,7 +4,7 @@
  * is the source of truth, not a generated draft).
  */
 import { nanoid } from "nanoid";
-import { eq, asc, desc, inArray } from "drizzle-orm";
+import { eq, asc, desc, inArray, and, notLike, sql } from "drizzle-orm";
 import { db } from "./db/client";
 import {
   projects,
@@ -12,11 +12,13 @@ import {
   stages,
   revisions,
   skills,
+  clients,
   type Project,
   type Intake,
   type Stage,
   type Revision,
   type Skill,
+  type Client,
 } from "./db/schema";
 import { WEBINAR_PIPELINE } from "./pipeline";
 
@@ -34,6 +36,7 @@ function slugify(name: string): string {
 export async function createProject(input: {
   clientName: string;
   rawText: string;
+  clientSlug?: string | null;
   ownerId?: string | null;
 }): Promise<{ id: string }> {
   const id = nanoid(12);
@@ -43,6 +46,7 @@ export async function createProject(input: {
     id,
     clientName: input.clientName,
     slug: `${slugify(input.clientName)}-${id.slice(0, 5)}`,
+    clientSlug: input.clientSlug ?? null,
     status: "active",
     ownerId: input.ownerId ?? null,
     createdAt: now,
@@ -143,6 +147,30 @@ export async function getStage(
 
 export async function getSkill(skillKey: string): Promise<Skill | null> {
   const [row] = await db.select().from(skills).where(eq(skills.skillKey, skillKey));
+  return row ?? null;
+}
+
+export interface ClientOption {
+  slug: string;
+  displayName: string;
+  vertical: string | null;
+}
+
+/** Clients for the New Project picker, excluding sandbox/UAT test entries. */
+export async function listClients(): Promise<ClientOption[]> {
+  return db
+    .select({
+      slug: clients.slug,
+      displayName: clients.displayName,
+      vertical: clients.vertical,
+    })
+    .from(clients)
+    .where(and(notLike(clients.slug, "sandbox-%"), notLike(clients.slug, "%uat%")))
+    .orderBy(asc(sql`lower(${clients.displayName})`));
+}
+
+export async function getClient(slug: string): Promise<Client | null> {
+  const [row] = await db.select().from(clients).where(eq(clients.slug, slug));
   return row ?? null;
 }
 
