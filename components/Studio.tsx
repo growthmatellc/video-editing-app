@@ -14,6 +14,7 @@ import {
 import { statusColor, statusLabel, type StageStatus } from "@/lib/stage-ui";
 import { MarkdownView } from "@/components/MarkdownView";
 import { AppHeader } from "@/components/AppHeader";
+import type { AuditResult } from "@/lib/audit";
 
 export interface GateScore {
   passed: boolean;
@@ -28,6 +29,7 @@ export interface StudioStage {
   outputMd: string | null;
   outputMeta: Record<string, unknown> | null;
   scoreJson: GateScore | null;
+  auditJson: AuditResult | null;
   gatePassed: boolean;
   gateAttempts: number;
 }
@@ -83,8 +85,9 @@ export function Studio({
     );
   }
 
-  async function runStage(kind: "run" | "reject") {
-    if (kind === "reject" && !feedback.trim()) {
+  async function runStage(kind: "run" | "reject", feedbackOverride?: string) {
+    const fb = (feedbackOverride ?? feedback).trim();
+    if (kind === "reject" && !fb) {
       setError("Add feedback before rejecting.");
       return;
     }
@@ -97,7 +100,7 @@ export function Studio({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ feedback: feedback.trim() || undefined }),
+          body: JSON.stringify({ feedback: fb || undefined }),
         },
       );
       const data = await res.json();
@@ -108,6 +111,7 @@ export function Studio({
         status: data.status ?? "draft",
         outputMd: data.outputMd ?? null,
         scoreJson: data.score ?? null,
+        auditJson: data.audit ?? null,
         gatePassed: data.score?.passed ?? false,
       });
       setFeedback("");
@@ -136,6 +140,16 @@ export function Studio({
     } finally {
       setBusy(null);
     }
+  }
+
+  // Re-run this stage with the audit's violations folded in as fix instructions.
+  function fixFromAudit(audit: AuditResult) {
+    const fixes = audit.violations
+      .map((v) => `- (${v.severity}) ${v.rule}: ${v.fix}${v.evidence ? ` [offending: "${v.evidence}"]` : ""}`)
+      .join("\n");
+    const text = `Fix these rule violations from the QC audit. Keep everything that already complies:\n${fixes}`;
+    setFeedback(text);
+    runStage("run", text);
   }
 
   async function loadRevisions() {
@@ -252,6 +266,11 @@ export function Studio({
           {/* Gate score */}
           {stage?.scoreJson && VOICE_GATED_STAGES.has(selectedKey) && (
             <GateBadge score={stage.scoreJson} attempts={stage.gateAttempts} />
+          )}
+
+          {/* Rules audit */}
+          {stage?.auditJson && !isIntake && (
+            <AuditPanel audit={stage.auditJson} onFix={fixFromAudit} busy={busy !== null} />
           )}
 
           {error && (
@@ -404,6 +423,58 @@ function GateBadge({ score, attempts }: { score: GateScore; attempts: number }) 
                 {v.severity}
               </span>
               {v.note}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function AuditPanel({
+  audit,
+  onFix,
+  busy,
+}: {
+  audit: AuditResult;
+  onFix: (audit: AuditResult) => void;
+  busy: boolean;
+}) {
+  const clean = audit.violations.length === 0;
+  const color = clean ? theme.color.ok : theme.color.warn;
+  return (
+    <div className="mt-3 rounded-[var(--radius)] border bg-[var(--surface)] p-3" style={{ borderColor: color }}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="font-medium" style={{ color }}>
+            Rules audit {clean ? "clean" : `— ${audit.violations.length} issue${audit.violations.length === 1 ? "" : "s"}`}
+          </span>
+          {audit.summary && <span className="text-[var(--text-muted)] text-xs">{audit.summary}</span>}
+        </div>
+        {!clean && (
+          <button
+            onClick={() => onFix(audit)}
+            disabled={busy}
+            className="shrink-0 rounded-[var(--radius)] border px-2.5 py-1 text-xs font-medium disabled:opacity-50 hover:border-[var(--accent)]"
+            style={{ borderColor: "var(--border)" }}
+          >
+            Fix &amp; re-run
+          </button>
+        )}
+      </div>
+      {!clean && (
+        <ul className="mt-2 space-y-1.5">
+          {audit.violations.map((v, i) => (
+            <li key={i} className="text-xs text-[var(--text-muted)]">
+              <span
+                className="uppercase font-medium mr-1.5"
+                style={{ color: v.severity === "high" ? theme.color.warn : undefined }}
+              >
+                {v.severity}
+              </span>
+              <span className="text-[var(--text)]">{v.rule}</span>
+              {v.evidence && <span className="italic"> — “{v.evidence}”</span>}
+              {v.fix && <span> → {v.fix}</span>}
             </li>
           ))}
         </ul>

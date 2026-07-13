@@ -9,6 +9,7 @@
  */
 import { generate, generateJson, stripFences } from "./llm";
 import { runWithGate, type GateScore } from "./gate";
+import { auditCopy, type AuditResult } from "./audit";
 import { VOICE_RULES } from "./voice-rules";
 import { STAGE_BY_KEY, VOICE_GATED_STAGES, type StageDef } from "./pipeline";
 import {
@@ -40,6 +41,7 @@ export interface RunResult {
   status: Stage["status"];
   outputMd: string;
   score?: GateScore | null;
+  audit?: AuditResult | null;
   error?: string;
 }
 
@@ -281,7 +283,13 @@ async function runProse(
     text = stripFences(raw);
   }
 
-  return finalize(stageRow, def, { outputMd: text, score, attempts }, feedback, operatorId);
+  // Rules for the post-delivery audit = the skill's method + learned corrections
+  // + craft rules/anchors. These carry the concrete checkable rules.
+  const rules = [skill.skillMd, skill.kbSkillMd, skill.learningsMd, skill.examplesMd]
+    .filter((s) => s && s.trim())
+    .join("\n\n");
+
+  return finalize(stageRow, def, { outputMd: text, score, attempts }, feedback, operatorId, rules);
 }
 
 // --- Brand kit (no LLM) ------------------------------------------------------
@@ -413,13 +421,18 @@ async function finalize(
   out: { outputMd: string; score: GateScore | null; attempts: number },
   feedback: string | undefined,
   operatorId: string | null | undefined,
+  rules: string,
 ): Promise<RunResult> {
+  // Audit the delivered copy against the stage's concrete skill rules.
+  const audit = await auditCopy({ stageLabel: def.label, rules, output: out.outputMd });
+
   await archiveRevision(stageRow, feedback ?? null, operatorId ?? null);
   await saveStageOutput(stageRow.id, {
     status: "draft",
     outputMd: out.outputMd,
     draftMd: stageRow.draftMd ?? out.outputMd,
     scoreJson: out.score,
+    auditJson: audit,
     gatePassed: out.score ? out.score.passed : false,
     gateAttempts: out.attempts,
   });
@@ -429,5 +442,6 @@ async function finalize(
     status: "draft",
     outputMd: out.outputMd,
     score: out.score,
+    audit,
   };
 }

@@ -72,6 +72,7 @@ export const stages = pgTable("stages", {
   outputMeta: jsonb("output_meta"),
   draftMd: text("draft_md"), // snapshot of the first generation, for a learning diff later
   scoreJson: jsonb("score_json"),
+  auditJson: jsonb("audit_json"), // post-delivery rules audit (lib/audit.ts)
   gatePassed: boolean("gate_passed").notNull().default(false),
   gateAttempts: integer("gate_attempts").notNull().default(0),
   approvedAt: timestamp("approved_at", { withTimezone: true }),

@@ -38,6 +38,7 @@ export default async function ProjectPage({
     outputMd: s.outputMd,
     outputMeta: s.outputMeta as Record<string, unknown> | null,
     scoreJson: s.scoreJson as StudioStage["scoreJson"],
+    auditJson: s.auditJson as StudioStage["auditJson"],
     gatePassed: s.gatePassed,
     gateAttempts: s.gateAttempts,
   }));
