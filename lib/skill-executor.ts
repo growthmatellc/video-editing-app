@@ -103,23 +103,33 @@ function buildSystem(
     text: `You are an expert direct-response strategist and copywriter producing one deliverable in a live-webinar funnel. You build on the locked context you are given and never contradict it.\n\nVoice rules (always honor):\n${VOICE_RULES}`,
   });
   // Everything after the role line is cacheable (stable across re-runs).
-  blocks.push({ text: skillMd, cache: true });
-  // GrowthMate craft skill(s) mapped to this stage (from growthmate-knowledge).
+  blocks.push({ text: `# Stage brief — what to produce\n${skillMd}`, cache: true });
+  // GrowthMate craft standard (method + workflows) mapped to this stage.
   if (kbSkillMd.trim()) {
     blocks.push({
-      text: `# GrowthMate craft standard for this deliverable (apply this method and quality bar)\n${kbSkillMd}`,
+      text:
+        `# GrowthMate craft standard — the AUTHORITATIVE method for this deliverable.\n` +
+        `Follow this method, workflow, cadence, and structure exactly. Where it conflicts ` +
+        `with the stage brief above, THIS wins.\n\n${kbSkillMd}`,
       cache: true,
     });
   }
   if (learningsMd.trim()) {
     blocks.push({
-      text: `# Overriding rules (learned corrections — these take precedence)\n${learningsMd}`,
+      text:
+        `# Learned corrections — highest precedence, these override everything above.\n${learningsMd}`,
       cache: true,
     });
   }
   if (examplesMd.trim()) {
     blocks.push({
-      text: `# Quality bar (reference examples — match this level, do not copy)\n${examplesMd}`,
+      text:
+        `# Best-performer anchors — MIRROR THESE.\n` +
+        `These are the winning, proven formats. Reproduce their STRUCTURE, sequence, ` +
+        `section order, cadence, and length — e.g. if an anchor is an 8-email + 4-SMS ` +
+        `sequence on a set day-by-day cadence with an escalating final-hour push, your ` +
+        `output has the same shape. Re-skin the voice, facts, names, mechanism, and offer ` +
+        `from the client context; never copy an anchor's specific client details.\n\n${examplesMd}`,
       cache: true,
     });
   }
@@ -259,7 +269,7 @@ async function runProse(
         const user = retryFeedback
           ? `${baseUser}\n\n# Reviewer feedback to address\n${retryFeedback}`
           : baseUser;
-        const { text } = await generate({ system, user, maxTokens: 8000 });
+        const { text } = await generate({ system, user, maxTokens: 16000 });
         return stripFences(text);
       },
     });
@@ -267,7 +277,7 @@ async function runProse(
     score = result.score;
     attempts = result.attempts;
   } else {
-    const { text: raw } = await generate({ system, user: baseUser, maxTokens: 8000 });
+    const { text: raw } = await generate({ system, user: baseUser, maxTokens: 16000 });
     text = stripFences(raw);
   }
 

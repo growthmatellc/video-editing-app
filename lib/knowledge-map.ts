@@ -1,39 +1,102 @@
 /**
- * Maps each pipeline stage (by skillKey) to the growthmate-knowledge craft
- * skill(s) whose SKILL.md should be folded into that stage's system prompt.
+ * Maps each pipeline stage to the growthmate-knowledge sources that define how
+ * its deliverable is built and what "best" looks like. `npm run sync:knowledge`
+ * loads these into the DB (nothing is read from the filesystem at runtime):
  *
- * The KB skills are craft disciplines (slide-building, scripting, funnel-copy…),
- * not per-stage deliverables, so this is a curated many-stages-to-few-skills map.
- * Deprecated KB skills (webinar-presentation-copy / -design, superseded by the
- * split skills) are intentionally excluded.
+ *   skills  -> skills.kbSkillMd    (each folder's SKILL.md + workflow/prompt files = the method)
+ *   skills  -> skills.learningsMd  (each folder's learnings/insights.md = learned corrections)
+ *   anchors -> skills.examplesMd   (best-performer sequences/decks/pages to MIRROR in structure)
+ *   craft   -> skills.examplesMd   (cross-cutting craft rules)
  *
- * `npm run sync:knowledge` reads these folders from the knowledge repo and writes
- * the concatenated content into skills.kbSkillMd for each stage. Nothing here is
- * read at runtime from the filesystem — the DB is the runtime source (Vercel-safe).
+ * Anchors matter most: the SKILL.md files are routers; the real cadence/format
+ * lives in the anchor library. Load the anchors a stage should copy the STRUCTURE
+ * of (voice/facts get re-skinned from the client context at generation time).
+ *
+ * `anchors` are paths under references/best-performers/.
+ * `craft`   are filenames under references/craft/.
  */
+export interface KbStageSource {
+  skills: string[];
+  anchors?: string[];
+  craft?: string[];
+}
 
-// stage skillKey -> knowledge-repo skill folder names (skills/<folder>/SKILL.md)
-export const KB_SKILL_MAP: Record<string, string[]> = {
-  "webinar-blueprint": ["slide-building"], // mechanism ideation + deck spine live here
-  "webinar-title": ["slide-building", "funnel-copy"], // Big Promise + "[promise] By [mechanism]" headline craft
-  "webinar-script": ["slide-building", "scripting"],
-  "webinar-slides": ["slide-building", "presentation-design"],
-  "offer-stack": ["slide-building"],
-  "registration-page": ["funnel-copy"],
-  "ad-creative": ["scripting"],
-  "email-sequences": ["email-sms-building"],
-  "sms-sequences": ["email-sms-building"],
-  "objection-qa-bank": ["slide-building"],
-  "designer-handoff": ["funnel-copy", "creative-director-v2"],
-  "funnel-spec": ["n8n-automation"],
-  "tracking-setup": ["n8n-automation"],
+export const KB_STAGE_SOURCES: Record<string, KbStageSource> = {
+  "webinar-blueprint": {
+    skills: ["slide-building"],
+    anchors: [
+      "webinar-decks/jane-mukami-metabolic-alignment-deck-v1.md",
+      "webinar-decks/mindstrong-rachel-metabolism-workshop-deck-v1.md",
+    ],
+  },
+  "webinar-title": {
+    skills: ["slide-building", "funnel-copy"],
+    anchors: [
+      "funnel-pages/jane-mukami-registration-page-v1.md",
+      "funnel-pages/mindstrong-rachel-reclaim-registration-page-v1.md",
+    ],
+  },
+  "webinar-script": {
+    skills: ["slide-building", "scripting"],
+    anchors: ["webinar-decks/jane-mukami-metabolic-alignment-deck-v1.md"],
+  },
+  "webinar-slides": {
+    skills: ["slide-building", "presentation-design"],
+    anchors: [
+      "webinar-decks/jane-mukami-metabolic-alignment-deck-v1.md",
+      "webinar-decks/erinne-full-circle-webinar-deck-v1.md",
+    ],
+  },
+  "offer-stack": {
+    skills: ["slide-building"],
+    anchors: ["webinar-decks/mindstrong-rachel-metabolism-workshop-deck-v1.md"],
+  },
+  "registration-page": {
+    skills: ["funnel-copy"],
+    anchors: [
+      "funnel-pages/REGISTRATION-PAGE-PATTERN.md",
+      "funnel-pages/jane-mukami-registration-page-v1.md",
+      "funnel-pages/jesse-korytko-registration-page-v1.md",
+    ],
+    craft: ["funnel-and-email-rules-lauren.md"],
+  },
+  "ad-creative": {
+    skills: ["scripting"],
+    anchors: [
+      "video-ads/jane-mukami-v1-belly-fat-hook.md",
+      "video-ads/mindstrong-rachel-v4-eat-less-move-more.md",
+      "video-ads/veronica-yu-v3-glp1-nutrition-gap.md",
+    ],
+  },
+  "email-sequences": {
+    skills: ["email-sms-building"],
+    anchors: [
+      "email-sequences/jane-mukami-live-webinar-show-up-sequence.md",
+      "email-sequences/jane-mukami-replay-sequence.md",
+      "email-sequences/hylke-soulfire-pre-webinar-sequence.md",
+      "email-sequences/jennyjean-replay-sequence.md",
+    ],
+    craft: ["funnel-and-email-rules-lauren.md", "email-sms-output-formatting.md"],
+  },
+  "sms-sequences": {
+    skills: ["email-sms-building"],
+    anchors: [
+      "email-sequences/jane-mukami-live-webinar-show-up-sequence.md",
+      "email-sequences/jane-mukami-replay-sequence.md",
+    ],
+    craft: ["email-sms-output-formatting.md"],
+  },
+  "objection-qa-bank": {
+    skills: ["slide-building"],
+    anchors: ["webinar-decks/jane-mukami-metabolic-alignment-deck-v1.md"],
+  },
+  "designer-handoff": {
+    skills: ["funnel-copy", "creative-director-v2"],
+    anchors: [
+      "funnel-pages/jane-mukami-webinar-confirmation-page-v1.md",
+      "funnel-pages/jane-mukami-replay-page-v1.md",
+    ],
+  },
+  "funnel-spec": { skills: ["n8n-automation"] },
+  "tracking-setup": { skills: ["n8n-automation"] },
 };
-
-// Per folder, which markdown file carries the skill body, in preference order.
-// All mapped folders currently ship SKILL.md; the fallbacks keep sync resilient
-// if a folder is later restructured (e.g. agent-spec style skills).
-export const KB_SKILL_FILE_CANDIDATES = [
-  "SKILL.md",
-  "02-system-prompt.md",
-  "README.md",
-];

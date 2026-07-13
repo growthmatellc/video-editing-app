@@ -8,13 +8,13 @@
  * so the app must read this content from Postgres at runtime. This script is the
  * bridge — run it locally after a git pull; the deployed app then uses the DB.
  *
- * Two syncs, both idempotent (upsert):
- *   1. Skills  — folds each mapped KB craft skill (lib/knowledge-map.ts) into
- *                skills.kbSkillMd for its pipeline stage. Requires the stage's
- *                skills row to already exist (run `npm run seed:skills` first).
- *   2. Clients — mirrors every clients/<slug>/ (info.json, style-guide.md,
- *                term-mappings.json) into the clients table.
+ * Per stage (lib/knowledge-map.ts), all idempotent upserts:
+ *   skills.kbSkillMd   = each skill folder's SKILL.md + workflow/prompt files (the method)
+ *   skills.learningsMd = each skill folder's learnings/insights.md (learned corrections)
+ *   skills.examplesMd  = best-performer anchors + craft rules (formats to MIRROR)
+ *   clients.*          = every clients/<slug>/ (info.json, style-guide.md, term-mappings.json)
  *
+ * Requires the stage's skills row to exist (run `npm run seed:skills` first).
  * Point at a different checkout with KNOWLEDGE_REPO_PATH=/abs/path npm run sync:knowledge
  */
 import { config } from "dotenv";
@@ -22,11 +22,11 @@ config({ path: ".env.local" });
 config();
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, basename } from "node:path";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../lib/db/client";
 import { skills, clients } from "../lib/db/schema";
-import { KB_SKILL_MAP, KB_SKILL_FILE_CANDIDATES } from "../lib/knowledge-map";
+import { KB_STAGE_SOURCES } from "../lib/knowledge-map";
 
 const KB = resolve(
   process.env.KNOWLEDGE_REPO_PATH ?? join(process.cwd(), "..", "growthmate-knowledge"),
@@ -34,60 +34,112 @@ const KB = resolve(
 
 const warnings: string[] = [];
 
-function readSkillBody(folder: string): string | null {
-  const dir = join(KB, "skills", folder);
-  if (!existsSync(dir)) return null;
-  for (const cand of KB_SKILL_FILE_CANDIDATES) {
-    const p = join(dir, cand);
-    if (existsSync(p)) return readFileSync(p, "utf8");
+function read(path: string): string | null {
+  if (!existsSync(path)) return null;
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
   }
-  return null;
 }
 
 function readJson(p: string): unknown | null {
-  if (!existsSync(p)) return null;
+  const raw = read(p);
+  if (raw === null) return null;
   try {
-    return JSON.parse(readFileSync(p, "utf8"));
+    return JSON.parse(raw);
   } catch {
     warnings.push(`  [client] could not parse JSON: ${p}`);
     return null;
   }
 }
 
-async function syncSkills() {
-  console.log("\nSkills → skills.kbSkillMd");
-  const existing = new Set(
-    (await db.select({ k: skills.skillKey }).from(skills)).map((r) => r.k),
-  );
-
-  let updated = 0;
-  for (const [stageKey, folders] of Object.entries(KB_SKILL_MAP)) {
-    const parts: string[] = [];
-    for (const folder of folders) {
-      const body = readSkillBody(folder);
-      if (!body) {
-        warnings.push(`  [skill] ${stageKey}: KB skill not found/empty: ${folder}`);
-        continue;
-      }
-      parts.push(`# GrowthMate craft skill: ${folder}\n\n${body.trim()}`);
-    }
-    const kbSkillMd = parts.join("\n\n---\n\n");
-    if (!kbSkillMd) continue;
-
-    if (!existing.has(stageKey)) {
-      warnings.push(
-        `  [skill] ${stageKey}: no skills row yet — run \`npm run seed:skills\` first`,
-      );
+// Recursively collect *.md files under dir whose basename is workflow.md or ends
+// with -prompt.md — the method/format files — skipping examples/incidents/deprecated.
+function collectMethodFiles(dir: string, acc: string[] = []): string[] {
+  if (!existsSync(dir)) return acc;
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    let isDir = false;
+    try {
+      isDir = statSync(full).isDirectory();
+    } catch {
       continue;
     }
-    await db
-      .update(skills)
-      .set({ kbSkillMd, updatedAt: sql`now()` })
-      .where(eq(skills.skillKey, stageKey));
-    updated += 1;
-    console.log(`  folded ${folders.join(" + ")} → ${stageKey}`);
+    if (isDir) {
+      collectMethodFiles(full, acc);
+      continue;
+    }
+    const name = entry.toLowerCase();
+    if (/example|incident|deprecated|pending/.test(name)) continue;
+    if (name === "workflow.md" || name.endsWith("-prompt.md")) acc.push(full);
   }
-  console.log(`  ${updated} stage(s) updated with KB craft skills.`);
+  return acc;
+}
+
+function syncStageContent() {
+  console.log("\nSkills → kbSkillMd / learningsMd / examplesMd");
+  return db
+    .select({ k: skills.skillKey })
+    .from(skills)
+    .then(async (rows) => {
+      const existing = new Set(rows.map((r) => r.k));
+      let updated = 0;
+
+      for (const [stageKey, src] of Object.entries(KB_STAGE_SOURCES)) {
+        if (!existing.has(stageKey)) {
+          warnings.push(`  [skill] ${stageKey}: no skills row — run \`npm run seed:skills\` first`);
+          continue;
+        }
+
+        // kbSkillMd = SKILL.md + method files, per skill folder.
+        const methodParts: string[] = [];
+        const learningParts: string[] = [];
+        for (const folder of src.skills) {
+          const dir = join(KB, "skills", folder);
+          if (!existsSync(dir)) {
+            warnings.push(`  [skill] ${stageKey}: KB skill folder missing: ${folder}`);
+            continue;
+          }
+          const skillMd = read(join(dir, "SKILL.md"));
+          if (skillMd) methodParts.push(`# GrowthMate skill: ${folder}\n\n${skillMd.trim()}`);
+          for (const f of collectMethodFiles(dir)) {
+            const body = read(f);
+            if (body) methodParts.push(`## ${folder}/${basename(f)}\n\n${body.trim()}`);
+          }
+          const insights = read(join(dir, "learnings", "insights.md"));
+          if (insights) learningParts.push(`# Learnings: ${folder}\n\n${insights.trim()}`);
+        }
+
+        // examplesMd = anchors + craft.
+        const exampleParts: string[] = [];
+        for (const a of src.anchors ?? []) {
+          const body = read(join(KB, "references", "best-performers", a));
+          if (body) exampleParts.push(`# ANCHOR (mirror this structure): ${a}\n\n${body.trim()}`);
+          else warnings.push(`  [anchor] ${stageKey}: missing ${a}`);
+        }
+        for (const c of src.craft ?? []) {
+          const body = read(join(KB, "references", "craft", c));
+          if (body) exampleParts.push(`# CRAFT RULES: ${c}\n\n${body.trim()}`);
+          else warnings.push(`  [craft] ${stageKey}: missing ${c}`);
+        }
+
+        await db
+          .update(skills)
+          .set({
+            kbSkillMd: methodParts.join("\n\n---\n\n"),
+            learningsMd: learningParts.join("\n\n---\n\n"),
+            examplesMd: exampleParts.join("\n\n---\n\n"),
+            updatedAt: sql`now()`,
+          })
+          .where(eq(skills.skillKey, stageKey));
+        updated += 1;
+        console.log(
+          `  ${stageKey}: ${src.skills.join("+")} | ${(src.anchors ?? []).length} anchor(s), ${(src.craft ?? []).length} craft`,
+        );
+      }
+      console.log(`  ${updated} stage(s) updated.`);
+    });
 }
 
 async function syncClients() {
@@ -97,9 +149,8 @@ async function syncClients() {
     warnings.push(`  [client] clients/ not found in ${KB}`);
     return;
   }
-
   const slugs = readdirSync(dir).filter((d) => {
-    if (d.startsWith("_") || d.startsWith(".")) return false; // _template, dotfiles
+    if (d.startsWith("_") || d.startsWith(".")) return false;
     try {
       return statSync(join(dir, d)).isDirectory();
     } catch {
@@ -111,11 +162,8 @@ async function syncClients() {
   for (const slug of slugs) {
     const cdir = join(dir, slug);
     const info = readJson(join(cdir, "info.json")) as Record<string, unknown> | null;
-    const styleGuideMd = existsSync(join(cdir, "style-guide.md"))
-      ? readFileSync(join(cdir, "style-guide.md"), "utf8")
-      : "";
+    const styleGuideMd = read(join(cdir, "style-guide.md")) ?? "";
     const termMappingsJson = readJson(join(cdir, "term-mappings.json"));
-
     const displayName =
       (info?.display_name as string) || (info?.company as string) || slug;
     const vertical = (info?.vertical as string) ?? null;
@@ -125,17 +173,9 @@ async function syncClients() {
       .values({ slug, displayName, vertical, infoJson: info, styleGuideMd, termMappingsJson })
       .onConflictDoUpdate({
         target: clients.slug,
-        set: {
-          displayName,
-          vertical,
-          infoJson: info,
-          styleGuideMd,
-          termMappingsJson,
-          updatedAt: sql`now()`,
-        },
+        set: { displayName, vertical, infoJson: info, styleGuideMd, termMappingsJson, updatedAt: sql`now()` },
       });
     count += 1;
-    console.log(`  ${slug} — ${displayName}`);
   }
   console.log(`  ${count} client(s) synced.`);
 }
@@ -143,19 +183,12 @@ async function syncClients() {
 async function main() {
   console.log(`Syncing from: ${KB}`);
   if (!existsSync(KB)) {
-    console.error(
-      `\nKnowledge repo not found at ${KB}.\n` +
-        `Clone it as a sibling, or set KNOWLEDGE_REPO_PATH to its location.`,
-    );
+    console.error(`\nKnowledge repo not found at ${KB}. Clone it as a sibling or set KNOWLEDGE_REPO_PATH.`);
     process.exit(1);
   }
-
-  await syncSkills();
+  await syncStageContent();
   await syncClients();
-
-  if (warnings.length) {
-    console.warn(`\nWarnings:\n${warnings.join("\n")}`);
-  }
+  if (warnings.length) console.warn(`\nWarnings:\n${warnings.join("\n")}`);
   console.log("\nDone.");
   process.exit(0);
 }
