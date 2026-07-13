@@ -76,28 +76,34 @@ export const WEBINAR_PIPELINE: StageDef[] = [
     skillKey: "sms-sequences", order: 11, phase: "launch-config", runnable: true,
   },
   {
+    key: "call-nurture",
+    label: "Call Nurture Sequence",
+    description: "Post-booking appointment-nurture: the emails + SMS that fire when a prospect books the 1-on-1 Strategy Session, to drive call show-up, frame the conversation, and pre-qualify. Separate from the webinar emails.",
+    skillKey: "call-nurture", order: 12, phase: "launch-config", runnable: true,
+  },
+  {
     key: "objection-qa-bank",
     label: "Objection & Q&A Bank",
     description: "The live close toolkit: top objections with reframes, and a seeded Q&A bank the presenter works through while the cart is open.",
-    skillKey: "objection-qa-bank", order: 12, phase: "launch-config", runnable: true,
+    skillKey: "objection-qa-bank", order: 13, phase: "launch-config", runnable: true,
   },
   {
     key: "designer-handoff",
     label: "Designer Handoff",
     description: "Consolidated build document for the funnel designer: registration page, thank-you/confirmation page, live room, replay page, and checkout, with all approved copy in place.",
-    skillKey: "designer-handoff", order: 13, phase: "launch-config", runnable: true,
+    skillKey: "designer-handoff", order: 14, phase: "launch-config", runnable: true,
   },
   {
     key: "funnel-spec",
     label: "Funnel Spec",
     description: "Technical build brief: webinar platform wiring (registration -> reminders -> live/replay -> checkout), automations, and integrations for the contractor.",
-    skillKey: "funnel-spec", order: 14, phase: "launch-config", runnable: true,
+    skillKey: "funnel-spec", order: 15, phase: "launch-config", runnable: true,
   },
   {
     key: "tracking-setup",
     label: "Tracking Setup",
     description: "Pixel events, UTM structure, and a registration -> show -> stay -> buy tracking sheet.",
-    skillKey: "tracking-setup", order: 15, phase: "launch-config", runnable: true,
+    skillKey: "tracking-setup", order: 16, phase: "launch-config", runnable: true,
   },
 ];
 
@@ -121,6 +127,7 @@ export const VOICE_GATED_STAGES = new Set<string>([
   "ad-creative",
   "email-sequences",
   "sms-sequences",
+  "call-nurture",
   "objection-qa-bank",
 ]);
 

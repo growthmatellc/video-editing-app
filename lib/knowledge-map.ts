@@ -86,6 +86,16 @@ export const KB_STAGE_SOURCES: Record<string, KbStageSource> = {
     ],
     craft: ["email-sms-output-formatting.md"],
   },
+  "call-nurture": {
+    skills: ["email-sms-building"],
+    anchors: [
+      "email-sequences/vfactor-health-appointment-nurture-sequence-FULL.md",
+      "email-sequences/vfactor-health-appointment-nurture-sequence.md",
+      "email-sequences/jennyjean-post-booking-call-sequence.md",
+      "email-sequences/hylke-soulfire-post-booking-pre-call-sequence.md",
+    ],
+    craft: ["funnel-and-email-rules-lauren.md", "email-sms-output-formatting.md"],
+  },
   "objection-qa-bank": {
     skills: ["slide-building"],
     anchors: ["webinar-decks/jane-mukami-metabolic-alignment-deck-v1.md"],
