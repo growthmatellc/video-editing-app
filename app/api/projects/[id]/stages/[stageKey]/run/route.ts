@@ -3,7 +3,9 @@ import { runStage } from "@/lib/skill-executor";
 import { getOperatorId } from "@/lib/auth";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+// Heavy sequence stages (full email/call sequences) can run several minutes on a
+// cold cache with a gate retry. Pro + Fluid Compute honors up to 800s.
+export const maxDuration = 800;
 
 export async function POST(
   req: Request,

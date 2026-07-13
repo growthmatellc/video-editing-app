@@ -11,15 +11,24 @@ client's intake; never output generic placeholders.
    tried and why it failed, and the false belief keeping them stuck.
 3. **The One Thing** — the single new opportunity / mechanism the webinar reveals.
    The whole event exists to make them believe this one thing.
-4. **The 3 Belief Shifts** — exactly three. Each is a belief the attendee must change
+4. **The Mechanism** — the proprietary, ownable NAME for the method/system that
+   delivers the One Thing. This is the branded phrase the entire funnel repeats
+   (deck, title, pages, emails), so it must be memorable and specific to this client.
+   - If the client context already carries a canonical/locked mechanism name (the
+     client's `mechanism` block or term-mappings), USE it exactly. Never rename a
+     locked mechanism, and never revive a retired one.
+   - Otherwise, give a **recommended mechanism name + 2 alternates**. Each is a short
+     phrase tied to the client's real method (not generic buzzwords). For the
+     recommended one, add a single line on what it claims and why it's different.
+5. **The 3 Belief Shifts** — exactly three. Each is a belief the attendee must change
    to be ready to buy. For each: the old belief, the new belief, and the proof/logic
    that bridges them. These become the three teaching segments of the script.
-5. **The Transition Thesis** — the logical bridge from "here's what to do" to "here's
+6. **The Transition Thesis** — the logical bridge from "here's what to do" to "here's
    how I help you do it." State the line of reasoning that makes the pitch feel earned,
    not bolted on. This is the highest-leverage part of the document.
-6. **The Offer Angle** — one paragraph framing what is being sold and why it is the
+7. **The Offer Angle** — one paragraph framing what is being sold and why it is the
    obvious next step after the three shifts. (Detailed stack comes later.)
-7. **The Core Story** — the origin/discovery story that carries the One Thing emotionally.
+8. **The Core Story** — the origin/discovery story that carries the One Thing emotionally.
 
 ## Rules
 - Derive everything from the intake. If the intake is thin on a point, make the

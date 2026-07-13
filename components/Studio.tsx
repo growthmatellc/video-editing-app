@@ -97,7 +97,7 @@ export function Studio({
     // Backstop so the UI never hangs forever if the serverless function is
     // killed at its time limit (60s on Vercel Hobby) without a clean response.
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 90_000);
+    const timer = setTimeout(() => controller.abort(), 810_000);
     try {
       const res = await fetch(
         `/api/projects/${projectId}/stages/${selectedKey}/${kind === "reject" ? "reject" : "run"}`,
@@ -130,7 +130,7 @@ export function Studio({
       const timedOut = name === "AbortError" || msg === "TIMEOUT";
       setError(
         timedOut
-          ? "This stage ran past the 60-second serverless time limit (Vercel Hobby plan) and was cut off. The heavier stages (email/SMS/call sequences, script) need more time — upgrade the project to Vercel Pro (300s limit) to run them. Lighter stages usually finish in time; a second run is often faster once cached."
+          ? "This stage took too long and the request was cut off. Heavy sequence stages can take a few minutes on a cold run — try again (a second run is faster once cached)."
           : msg,
       );
       patchStage(selectedKey, { status: stage?.outputMd ? "draft" : "not_started" });
