@@ -9,7 +9,7 @@
  * It is a report, not a blocker: violations surface in the UI so the operator can
  * reject-and-re-run. If the audit call fails it returns "clean" so it never blocks.
  */
-import { generateJson } from "./llm";
+import { generateJson, REVIEW_MODEL } from "./llm";
 
 export interface AuditViolation {
   rule: string; // the specific rule that was broken
@@ -66,6 +66,7 @@ export async function auditCopy(opts: {
       ],
       user: `Audit this delivered copy against the rules above. Return the JSON verdict.\n\n--- DELIVERED COPY ---\n${opts.output}\n--- END ---`,
       maxTokens: 3000,
+      model: REVIEW_MODEL,
     });
     return {
       passed: !!data.passed,

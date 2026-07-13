@@ -33,7 +33,30 @@ import {
 import { renderDeck } from "./slide-renderer";
 import type { Stage } from "./db/schema";
 
-const MAX_GATE_ATTEMPTS = 3;
+const MAX_GATE_ATTEMPTS = 2;
+
+// Per-stage output-token budget. Short deliverables (a title, a few SMS) don't
+// need 16k tokens — capping them keeps generation fast and within the function
+// time limit. Long sequences (full email/call sequences, scripts) keep headroom.
+const STAGE_MAX_TOKENS: Record<string, number> = {
+  "webinar-title": 4000,
+  "sms-sequences": 4000,
+  "registration-page": 6000,
+  "webinar-blueprint": 8000,
+  "offer-stack": 8000,
+  "ad-creative": 8000,
+  "tracking-setup": 8000,
+  "image-ads": 10000,
+  "objection-qa-bank": 10000,
+  "funnel-spec": 10000,
+  "email-sequences": 16000,
+  "call-nurture": 16000,
+  "webinar-script": 16000,
+  "designer-handoff": 16000,
+};
+function outputBudget(stageKey: string): number {
+  return STAGE_MAX_TOKENS[stageKey] ?? 8000;
+}
 
 export interface RunResult {
   ok: boolean;
@@ -271,7 +294,7 @@ async function runProse(
         const user = retryFeedback
           ? `${baseUser}\n\n# Reviewer feedback to address\n${retryFeedback}`
           : baseUser;
-        const { text } = await generate({ system, user, maxTokens: 16000 });
+        const { text } = await generate({ system, user, maxTokens: outputBudget(def.key) });
         return stripFences(text);
       },
     });
@@ -279,7 +302,7 @@ async function runProse(
     score = result.score;
     attempts = result.attempts;
   } else {
-    const { text: raw } = await generate({ system, user: baseUser, maxTokens: 16000 });
+    const { text: raw } = await generate({ system, user: baseUser, maxTokens: outputBudget(def.key) });
     text = stripFences(raw);
   }
 

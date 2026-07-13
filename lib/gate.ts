@@ -6,7 +6,7 @@
  * persuasive structure, and the voice rules. It never invents facts and never
  * references any agency.
  */
-import { generateJson } from "./llm";
+import { generateJson, REVIEW_MODEL } from "./llm";
 import { VOICE_RULES } from "./voice-rules";
 
 export interface Violation {
@@ -79,6 +79,7 @@ export async function runWithGate(opts: {
         system: [{ text: reviewerSystem(stageLabel, userIntent), cache: true }],
         user: `Review this draft and return the JSON verdict.\n\n---\n${lastText}\n---`,
         maxTokens: 1500,
+        model: REVIEW_MODEL,
       });
       score = {
         passed: !!data.passed,

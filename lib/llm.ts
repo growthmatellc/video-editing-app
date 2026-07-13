@@ -22,10 +22,15 @@ export interface SystemBlock {
   cache?: boolean;
 }
 
+// Fast, cheap model for evaluator tasks (gate reviewer, rules audit) so those
+// extra calls don't add Opus-sized latency to every stage run.
+export const REVIEW_MODEL = process.env.REVIEW_MODEL ?? "claude-haiku-4-5-20251001";
+
 export async function generate(opts: {
   system: SystemBlock[];
   user: string;
   maxTokens?: number;
+  model?: string;
 }): Promise<{ text: string; usage: { input_tokens: number; output_tokens: number } }> {
   if (!gatewayKey && !anthropicKey) {
     throw new Error(
@@ -34,7 +39,7 @@ export async function generate(opts: {
   }
 
   const res = await client.messages.create({
-    model,
+    model: opts.model ?? model,
     max_tokens: opts.maxTokens ?? 8000,
     system: opts.system.map((b) => ({
       type: "text" as const,
@@ -67,6 +72,7 @@ export async function generateJson<T = unknown>(opts: {
   system: SystemBlock[];
   user: string;
   maxTokens?: number;
+  model?: string;
 }): Promise<{ data: T; usage: { input_tokens: number; output_tokens: number } }> {
   const { text, usage } = await generate(opts);
   const cleaned = stripFences(text);
