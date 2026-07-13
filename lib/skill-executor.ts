@@ -16,6 +16,7 @@ import {
   getStage,
   getSkill,
   getClient,
+  ensureStage,
   archiveRevision,
   saveStageOutput,
   type ProjectWithStages,
@@ -54,8 +55,9 @@ export async function runStage(
 
   const data = await getProject(projectId);
   if (!data) throw new Error(`Project not found: ${projectId}`);
-  const stageRow = await getStage(projectId, stageKey);
-  if (!stageRow) throw new Error(`Stage row missing: ${stageKey}`);
+  // Auto-create the row if this stage was added to the pipeline after the
+  // project was created, so new stages work on existing projects.
+  const stageRow = (await getStage(projectId, stageKey)) ?? (await ensureStage(projectId, def));
 
   // Load the linked knowledge-base client (if any) once; its profile, style
   // guide, and retired-term rules become locked context for every stage.

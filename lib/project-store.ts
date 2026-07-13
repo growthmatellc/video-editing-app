@@ -20,7 +20,7 @@ import {
   type Skill,
   type Client,
 } from "./db/schema";
-import { WEBINAR_PIPELINE } from "./pipeline";
+import { WEBINAR_PIPELINE, type StageDef } from "./pipeline";
 
 function slugify(name: string): string {
   return (
@@ -143,6 +143,27 @@ export async function getStage(
     .from(stages)
     .where(eq(stages.id, `${projectId}-${stageKey}`));
   return row ?? null;
+}
+
+/**
+ * Insert a stage row for a project that predates this stage being added to the
+ * pipeline. Idempotent (does nothing if it already exists) and returns the row.
+ */
+export async function ensureStage(projectId: string, def: StageDef): Promise<Stage> {
+  const now = new Date();
+  await db
+    .insert(stages)
+    .values({
+      id: `${projectId}-${def.key}`,
+      projectId,
+      stageKey: def.key,
+      stageOrder: def.order,
+      status: "not_started",
+      updatedAt: now,
+    })
+    .onConflictDoNothing({ target: stages.id });
+  const [row] = await db.select().from(stages).where(eq(stages.id, `${projectId}-${def.key}`));
+  return row;
 }
 
 export async function getSkill(skillKey: string): Promise<Skill | null> {

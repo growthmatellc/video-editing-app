@@ -15,6 +15,7 @@
 // stage skillKey -> knowledge-repo skill folder names (skills/<folder>/SKILL.md)
 export const KB_SKILL_MAP: Record<string, string[]> = {
   "webinar-blueprint": ["slide-building"], // mechanism ideation + deck spine live here
+  "webinar-title": ["slide-building", "funnel-copy"], // Big Promise + "[promise] By [mechanism]" headline craft
   "webinar-script": ["slide-building", "scripting"],
   "webinar-slides": ["slide-building", "presentation-design"],
   "offer-stack": ["slide-building"],
