@@ -68,6 +68,13 @@ export const KB_STAGE_SOURCES: Record<string, KbStageSource> = {
       "video-ads/veronica-yu-v3-glp1-nutrition-gap.md",
     ],
   },
+  "funnel-videos": {
+    skills: ["scripting"],
+    anchors: [
+      "confirmation-videos/webinar-confirmation-video.md",
+      "confirmation-videos/call-booking-confirmation-video.md",
+    ],
+  },
   "email-sequences": {
     skills: ["email-sms-building"],
     anchors: [
