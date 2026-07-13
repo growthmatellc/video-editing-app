@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { theme } from "@/theme/tokens";
+import { SyncKnowledgeButton } from "@/components/SyncKnowledgeButton";
 
 /**
  * App chrome. The name comes from theme.appName (NEXT_PUBLIC_APP_NAME). Drop a
@@ -19,12 +20,15 @@ export function AppHeader() {
             {theme.appName}
           </span>
         </Link>
-        <Link
-          href="/new"
-          className="text-sm text-[var(--text-muted)] hover:text-[var(--text)]"
-        >
-          + New
-        </Link>
+        <div className="flex items-center gap-5">
+          <SyncKnowledgeButton />
+          <Link
+            href="/new"
+            className="text-sm text-[var(--text-muted)] hover:text-[var(--text)]"
+          >
+            + New
+          </Link>
+        </div>
       </div>
     </header>
   );
