@@ -72,7 +72,13 @@ function collectMethodFiles(dir: string, acc: string[] = []): string[] {
     }
     const name = entry.toLowerCase();
     if (/example|incident|deprecated|pending/.test(name)) continue;
-    if (name === "workflow.md" || name.endsWith("-prompt.md")) acc.push(full);
+    // workflow + prompt files, plus agent-spec skills (image-ads-creation etc.)
+    if (
+      name === "workflow.md" ||
+      name.endsWith("-prompt.md") ||
+      name.endsWith("-specification.md")
+    )
+      acc.push(full);
   }
   return acc;
 }

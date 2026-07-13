@@ -75,6 +75,11 @@ export const KB_STAGE_SOURCES: Record<string, KbStageSource> = {
       "confirmation-videos/call-booking-confirmation-video.md",
     ],
   },
+  // image-ads-creation has no cross-client anchor library (it works off the
+  // client's own best-performing ads). The method lives in its agent-spec files.
+  "image-ads": {
+    skills: ["image-ads-creation"],
+  },
   "email-sequences": {
     skills: ["email-sms-building"],
     anchors: [
