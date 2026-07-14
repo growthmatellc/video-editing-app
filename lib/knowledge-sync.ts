@@ -108,6 +108,13 @@ export async function syncKnowledge(kb: string): Promise<SyncResult> {
       if (body) exampleParts.push(`# CRAFT RULES: ${c}\n\n${body.trim()}`);
       else warnings.push(`${stageKey}: missing craft ${c}`);
     }
+    // Craft rules that live inside a skill's own references/ folder. collectMethodFiles
+    // above only picks up workflow/prompt/spec files, so these are named explicitly.
+    for (const r of src.skillRefs ?? []) {
+      const body = read(join(kb, r));
+      if (body) exampleParts.push(`# CRAFT RULES: ${r}\n\n${body.trim()}`);
+      else warnings.push(`${stageKey}: missing skillRef ${r}`);
+    }
 
     await db
       .update(skills)

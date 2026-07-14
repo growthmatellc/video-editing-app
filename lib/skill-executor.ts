@@ -53,6 +53,9 @@ const STAGE_MAX_TOKENS: Record<string, number> = {
   "call-nurture": 16000,
   "webinar-script": 16000,
   "designer-handoff": 16000,
+  // The deck depth benchmark (slide-building/SKILL.md) is ~55-70 live slides, each
+  // its own JSON object. 8k truncates that to a fraction of the anchors' depth.
+  "webinar-slides": 32000,
 };
 function outputBudget(stageKey: string): number {
   return STAGE_MAX_TOKENS[stageKey] ?? 8000;
@@ -117,16 +120,25 @@ export async function runStage(
 
 // --- Prompt assembly ---------------------------------------------------------
 
+const PROSE_ROLE = `You are an expert direct-response strategist and copywriter producing one deliverable in a live-webinar funnel. You build on the locked context you are given and never contradict it.\n\nVoice rules (always honor):\n${VOICE_RULES}`;
+
+/**
+ * `lead` is the opening role block. Prose stages use PROSE_ROLE; the slide stage
+ * passes SLIDES_SYSTEM_PROMPT so its JSON output contract comes first. Everything
+ * after it (method, learnings, anchors) is identical either way — the slide deck
+ * needs the anchors and learned corrections just as much as the prose stages do.
+ */
 function buildSystem(
   skillMd: string,
   learningsMd: string,
   examplesMd: string,
   kbSkillMd = "",
+  lead: string = PROSE_ROLE,
 ) {
+  // The lead stays uncached: the 4 blocks below already use Anthropic's max of 4
+  // cache_control breakpoints, and the lead sits inside the cached prefix regardless.
   const blocks: { text: string; cache?: boolean }[] = [];
-  blocks.push({
-    text: `You are an expert direct-response strategist and copywriter producing one deliverable in a live-webinar funnel. You build on the locked context you are given and never contradict it.\n\nVoice rules (always honor):\n${VOICE_RULES}`,
-  });
+  blocks.push({ text: lead });
   // Everything after the role line is cacheable (stable across re-runs).
   blocks.push({ text: `# Stage brief — what to produce\n${skillMd}`, cache: true });
   // GrowthMate craft standard (method + workflows) mapped to this stage.
@@ -368,21 +380,22 @@ async function runSlides(
   clientContext: string | null,
 ): Promise<RunResult> {
   const skill = await getSkill(def.skillKey ?? "webinar-slides");
-  const system = [
-    { text: SLIDES_SYSTEM_PROMPT, cache: true },
-    ...(skill?.kbSkillMd?.trim()
-      ? [{
-          text: `# GrowthMate slide-craft standard (apply this method and quality bar)\n${skill.kbSkillMd}`,
-          cache: true,
-        }]
-      : []),
-  ];
+  // Same knowledge stack as every prose stage — the deck anchors and the learned
+  // corrections in slide-building/learnings/insights.md are what hold the output to
+  // the best-performer shape (depth, one-idea-per-slide, the Tom deck-craft gates).
+  const system = buildSystem(
+    skill?.skillMd ?? "",
+    skill?.learningsMd ?? "",
+    skill?.examplesMd ?? "",
+    skill?.kbSkillMd ?? "",
+    SLIDES_SYSTEM_PROMPT,
+  );
   const baseUser = buildUser(data, def, feedback, stageRow.outputMd, clientContext);
 
   const { data: parsed } = await generateJson<SlideDeck>({
     system,
     user: baseUser,
-    maxTokens: 8000,
+    maxTokens: outputBudget(def.key),
   });
   if (!isValidDeck(parsed)) throw new Error("Model did not return a valid SlideDeck with slides.");
 
