@@ -19,7 +19,8 @@ webinar-title clichés.
 - Lead with the **Big Promise** from the blueprint. The title is the promise
   compressed to a phrase the prospect would say yes to.
 - The **"[Promise] By [Mechanism]"** formula is the workhorse: the transformation
-  plus the counterintuitive method (e.g. "Get Lean After 40 — By Eating More, Not Less").
+  plus the counterintuitive method (e.g. "Get Lean After 40 By Eating More, Not Less").
+  Never use em dashes in a title; use a comma, a colon, or split it into a subtitle.
 - Mirror the language the title-slide and registration-page headline will use, so
   the funnel reads as one piece.
 - Imply the mechanism/new opportunity so it feels fresh, not another generic training.

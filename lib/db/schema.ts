@@ -33,6 +33,15 @@ export const clients = pgTable("clients", {
   infoJson: jsonb("info_json"), // the client's info.json, verbatim
   styleGuideMd: text("style_guide_md").notNull().default(""), // style-guide.md
   termMappingsJson: jsonb("term_mappings_json"), // term-mappings.json (retired terms)
+  // The /onboard research corpus: CHEATSHEET.md + briefs/ + research/ concatenated,
+  // in the precedence order clients/README.md defines. This IS the client's intake —
+  // a project created against this client seeds its intake from here rather than
+  // asking a human to paste one (see project-store.createProject).
+  onboardingMd: text("onboarding_md").notNull().default(""),
+  // Open gates carried out of /onboard (CHEATSHEET "Open questions"). Unresolved on
+  // purpose: /onboard extracts, Lauren decides. Surfaced in the UI so nobody ships a
+  // funnel that quietly guessed a credential or which proof story leads.
+  openGatesMd: text("open_gates_md").notNull().default(""),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

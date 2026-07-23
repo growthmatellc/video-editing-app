@@ -5,7 +5,7 @@ import { useState } from "react";
 type State =
   | { kind: "idle" }
   | { kind: "syncing" }
-  | { kind: "done"; msg: string }
+  | { kind: "done"; msg: string; warnings: string[] }
   | { kind: "error"; msg: string };
 
 export function SyncKnowledgeButton() {
@@ -19,12 +19,18 @@ export function SyncKnowledgeButton() {
       if (!res.ok || data.ok === false) {
         throw new Error(data.error ?? "Sync failed");
       }
+      const warnings: string[] = Array.isArray(data.warnings) ? data.warnings : [];
       setState({
         kind: "done",
         msg: `Synced ${data.stages} stages · ${data.clients} clients`,
+        warnings,
       });
-      // Refresh the page so any client-list/data changes show.
-      setTimeout(() => window.location.reload(), 1200);
+      // Only auto-reload on a clean sync. If anything was skipped (missing folder,
+      // no skills row, missing anchor), keep the warnings on screen so the edit
+      // that got dropped is actually visible instead of flashing green.
+      if (warnings.length === 0) {
+        setTimeout(() => window.location.reload(), 1200);
+      }
     } catch (err) {
       setState({ kind: "error", msg: err instanceof Error ? err.message : String(err) });
     }
@@ -32,8 +38,16 @@ export function SyncKnowledgeButton() {
 
   return (
     <div className="flex items-center gap-2">
-      {state.kind === "done" && (
+      {state.kind === "done" && state.warnings.length === 0 && (
         <span className="text-xs text-[var(--ok)]">{state.msg}</span>
+      )}
+      {state.kind === "done" && state.warnings.length > 0 && (
+        <span
+          className="text-xs text-[var(--warn)] max-w-[360px] truncate"
+          title={state.warnings.join("\n")}
+        >
+          {state.msg} — {state.warnings.length} skipped (hover)
+        </span>
       )}
       {state.kind === "error" && (
         <span className="text-xs text-[var(--warn)] max-w-[280px] truncate" title={state.msg}>

@@ -286,7 +286,12 @@ export function Studio({
 
           {/* Rules audit */}
           {stage?.auditJson && !isIntake && (
-            <AuditPanel audit={stage.auditJson} onFix={fixFromAudit} busy={busy !== null} />
+            <AuditPanel
+              audit={stage.auditJson}
+              onFix={fixFromAudit}
+              busy={busy !== null}
+              attempts={stage.gateAttempts}
+            />
           )}
 
           {error && (
@@ -451,20 +456,36 @@ function AuditPanel({
   audit,
   onFix,
   busy,
+  attempts = 1,
 }: {
   audit: AuditResult;
   onFix: (audit: AuditResult) => void;
   busy: boolean;
+  attempts?: number;
 }) {
+  const blocking = audit.violations.filter((v) => v.severity === "high").length;
+  const warnings = audit.violations.length - blocking;
   const clean = audit.violations.length === 0;
-  const color = clean ? theme.color.ok : theme.color.warn;
+  // Blocking (HARD) issues that survived auto-rewrite go red; warnings-only is soft.
+  const color = blocking > 0 ? theme.color.warn : theme.color.ok;
+  const headline = clean
+    ? "clean"
+    : [
+        blocking > 0 ? `${blocking} blocking` : null,
+        warnings > 0 ? `${warnings} warning${warnings === 1 ? "" : "s"}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
   return (
     <div className="mt-3 rounded-[var(--radius)] border bg-[var(--surface)] p-3" style={{ borderColor: color }}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-sm">
           <span className="font-medium" style={{ color }}>
-            Rules audit {clean ? "clean" : `— ${audit.violations.length} issue${audit.violations.length === 1 ? "" : "s"}`}
+            Rules audit {clean ? "clean" : `— ${headline}`}
           </span>
+          {attempts > 1 && (
+            <span className="text-[var(--text-muted)] text-xs">auto-revised ×{attempts - 1}</span>
+          )}
           {audit.summary && <span className="text-[var(--text-muted)] text-xs">{audit.summary}</span>}
         </div>
         {!clean && (

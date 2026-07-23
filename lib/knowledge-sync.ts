@@ -150,17 +150,119 @@ export async function syncKnowledge(kb: string): Promise<SyncResult> {
       const displayName =
         (info?.display_name as string) || (info?.company as string) || slug;
       const vertical = (info?.vertical as string) ?? null;
+      const onboardingMd = collectOnboarding(cdir, read);
+      const openGatesMd = extractOpenGates(read(join(cdir, "CHEATSHEET.md")));
+
+      if (!onboardingMd.trim()) {
+        warnings.push(
+          `${slug}: no onboarding research (CHEATSHEET/briefs/research all empty) — ` +
+            `projects for this client will have no auto-intake`,
+        );
+      }
 
       await db
         .insert(clients)
-        .values({ slug, displayName, vertical, infoJson: info, styleGuideMd, termMappingsJson })
+        .values({
+          slug, displayName, vertical, infoJson: info, styleGuideMd, termMappingsJson,
+          onboardingMd, openGatesMd,
+        })
         .onConflictDoUpdate({
           target: clients.slug,
-          set: { displayName, vertical, infoJson: info, styleGuideMd, termMappingsJson, updatedAt: sql`now()` },
+          set: {
+            displayName, vertical, infoJson: info, styleGuideMd, termMappingsJson,
+            onboardingMd, openGatesMd, updatedAt: sql`now()`,
+          },
         });
       clientCount += 1;
     }
   }
 
   return { stages: stageCount, clients: clientCount, warnings };
+}
+
+// --- Onboarding research -----------------------------------------------------
+
+type Reader = (path: string) => string | null;
+
+const mdIn = (dir: string): string[] =>
+  existsSync(dir)
+    ? readdirSync(dir).filter((f) => f.toLowerCase().endsWith(".md")).sort()
+    : [];
+
+/**
+ * Assemble the /onboard research corpus for one client, in the precedence order
+ * clients/README.md defines. This becomes the project's intake.
+ *
+ * The completed onboarding doc is the client's own words and outranks everything
+ * else — it leads, and the banner says so, because the corpus also carries sources
+ * that are known to contradict it (the agency-authored case-study PDFs rank lowest).
+ * Order alone doesn't tell a model what wins; the banner does.
+ */
+function collectOnboarding(cdir: string, read: Reader): string {
+  const parts: string[] = [];
+  const add = (path: string, heading: string) => {
+    const body = read(path)?.trim();
+    if (body) parts.push(`# ${heading}\n\n${body}`);
+  };
+
+  const researchDir = join(cdir, "research");
+  const research = mdIn(researchDir);
+  // Authoritative source first, whatever its date prefix.
+  const completed = research.filter((f) => /onboarding-doc-completed/i.test(f));
+  const otherResearch = research.filter((f) => !/onboarding-doc-completed/i.test(f));
+
+  for (const f of completed) {
+    add(join(researchDir, f), `AUTHORITATIVE — the client's completed onboarding doc (${f})`);
+  }
+  add(join(cdir, "CHEATSHEET.md"), "Cheat sheet — the 1-page version, incl. watch-outs");
+
+  const briefsDir = join(cdir, "briefs");
+  // human-brief is the narrative orientation; lead the briefs with it.
+  const briefs = mdIn(briefsDir);
+  for (const f of [...briefs.filter((b) => /human-brief/i.test(b)), ...briefs.filter((b) => !/human-brief/i.test(b))]) {
+    add(join(briefsDir, f), `Brief — ${f}`);
+  }
+  for (const f of otherResearch) add(join(researchDir, f), `Research — ${f}`);
+  add(join(cdir, "design", "brand-guidelines-extract.md"), "Brand guidelines");
+
+  if (!parts.length) return "";
+
+  return [
+    `# Client onboarding research — THE INTAKE, extracted by /onboard.`,
+    `This is the source of truth for this client. Build from it; do not invent facts it does not contain.`,
+    ``,
+    `SOURCE PRECEDENCE — where sources disagree, the higher one WINS:`,
+    `  1. The client's completed onboarding doc (his own words)`,
+    `  2. The cheat sheet and human brief`,
+    `  3. Everything else (external research, DM playbook, VSL transcripts)`,
+    `  LOWEST. Agency-authored case-study PDFs — known to contradict the client's own doc.`,
+    ``,
+    `Where this corpus flags an OPEN GATE or a watch-out, honor it as a hard constraint.`,
+    `Do not resolve a gate yourself to unblock your output.`,
+    ``,
+    `---`,
+    ``,
+    parts.join("\n\n---\n\n"),
+  ].join("\n");
+}
+
+/**
+ * Pull the CHEATSHEET's watch-outs + open questions. These are the decisions /onboard
+ * deliberately did NOT make (they're Lauren's), and the things that must not be
+ * silently guessed — a credential, a medical claim, which proof story leads.
+ */
+function extractOpenGates(cheatsheet: string | null): string {
+  if (!cheatsheet) return "";
+  const lines = cheatsheet.split("\n");
+  const out: string[] = [];
+  let capturing = false;
+  for (const line of lines) {
+    if (/^#{1,4}\s/.test(line)) {
+      capturing = /watch-?out|open question|gate|blocker/i.test(line);
+      if (capturing) out.push(line);
+      continue;
+    }
+    if (capturing) out.push(line);
+  }
+  return out.join("\n").trim();
 }

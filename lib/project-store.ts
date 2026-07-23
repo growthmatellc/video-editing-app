@@ -22,6 +22,54 @@ import {
 } from "./db/schema";
 import { WEBINAR_PIPELINE, type StageDef } from "./pipeline";
 
+/**
+ * The intake for a project = the client's /onboard research corpus (the facts:
+ * offer, avatar, mechanism, voice, proof) + whatever the operator typed for THIS
+ * webinar (the specifics: date, angle, lead magnet).
+ *
+ * The operator's note is an addendum, never a replacement. Typing "launch Aug 11"
+ * into the box must not throw away 2,500 lines of onboarding research.
+ *
+ * Open gates ride along as hard constraints so a stage can't quietly invent an
+ * answer to a question /onboard deliberately left for a human.
+ */
+function buildIntake(client: Client | null, operatorText: string): string {
+  const note = operatorText.trim();
+  if (!client?.onboardingMd.trim()) {
+    // No research on file — the operator's text is all we have. An empty intake here
+    // means every downstream stage generates from nothing; the caller should not
+    // have gotten this far. Say so loudly rather than emitting a silent "(none)".
+    return note || "";
+  }
+
+  const parts = [client.onboardingMd.trim()];
+
+  if (client.openGatesMd.trim()) {
+    parts.push(
+      [
+        `# ⚠️ OPEN GATES — unresolved by design. HARD CONSTRAINTS.`,
+        ``,
+        `These are decisions /onboard deliberately did NOT make; a human owns them.`,
+        `You must NOT resolve one to unblock your output. Where a gate touches what you`,
+        `are writing: honor the stated constraint, choose the option the research`,
+        `recommends, and if neither is possible, write [GATE — needs human decision]`,
+        `rather than inventing a fact. Never state a credential, medical claim, or`,
+        `proof-story detail that the gates flag as unresolved or contradicted.`,
+        ``,
+        client.openGatesMd.trim(),
+      ].join("\n"),
+    );
+  }
+
+  if (note) {
+    parts.push(
+      `# This webinar — operator note (specifics for THIS launch)\n\n${note}`,
+    );
+  }
+
+  return parts.join("\n\n---\n\n");
+}
+
 function slugify(name: string): string {
   return (
     name
@@ -42,6 +90,15 @@ export async function createProject(input: {
   const id = nanoid(12);
   const now = new Date();
 
+  // The intake is not a human's job to paste. /onboard already extracted it into
+  // clients/<slug>/ and sync:knowledge loaded it here, so a project against a known
+  // client seeds its intake from that research. Anything typed into the box is
+  // treated as an addendum for THIS webinar (the launch's specifics), not a
+  // replacement for the client's onboarding — so operators can't accidentally
+  // discard the research by typing one line.
+  const client = input.clientSlug ? await getClient(input.clientSlug) : null;
+  const rawText = buildIntake(client, input.rawText);
+
   await db.insert(projects).values({
     id,
     clientName: input.clientName,
@@ -55,7 +112,7 @@ export async function createProject(input: {
 
   await db.insert(intakes).values({
     projectId: id,
-    rawText: input.rawText,
+    rawText,
     fields: {},
     submittedAt: now,
   });
@@ -68,7 +125,7 @@ export async function createProject(input: {
       stageKey: s.key,
       stageOrder: s.order,
       status: (s.key === "intake" ? "approved" : "not_started") as Stage["status"],
-      outputMd: s.key === "intake" ? input.rawText : null,
+      outputMd: s.key === "intake" ? rawText : null,
       approvedAt: s.key === "intake" ? now : null,
       updatedAt: now,
     })),
