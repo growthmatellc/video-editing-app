@@ -11,7 +11,9 @@
     "db:push": "drizzle-kit push",
     "db:migrate": "drizzle-kit migrate",
     "seed:skills": "tsx scripts/seed-skills.ts",
-    "sync:knowledge": "tsx scripts/sync-knowledge.ts"
+    "sync:knowledge": "tsx scripts/sync-knowledge.ts",
+    "vendor:auditor": "tsx scripts/vendor-auditor.ts",
+    "run:pipeline": "tsx --env-file-if-exists=.env.local scripts/run-pipeline.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.106.0",

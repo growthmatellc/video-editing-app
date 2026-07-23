@@ -8,10 +8,11 @@
  * (JSON -> .pptx), archives any prior output into revisions, and saves the draft.
  */
 import { generate, generateJson, stripFences } from "./llm";
-import { runWithGate, type GateScore } from "./gate";
+import { reviewDraft, PASS_THRESHOLD, type GateScore } from "./gate";
 import { auditCopy, type AuditResult } from "./audit";
+import { auditBundle, hardViolationFeedback, RICH_ASSET_TYPES, type CopyAuditReport } from "./copy-auditor";
 import { VOICE_RULES } from "./voice-rules";
-import { STAGE_BY_KEY, VOICE_GATED_STAGES, type StageDef } from "./pipeline";
+import { STAGE_BY_KEY, STAGE_ASSET_TYPE, VOICE_GATED_STAGES, type StageDef } from "./pipeline";
 import {
   getProject,
   getStage,
@@ -76,13 +77,25 @@ export async function runStage(
   stageKey: string,
   feedback?: string,
   operatorId?: string | null,
+  opts?: { chainDrafts?: boolean },
 ): Promise<RunResult> {
   const def = STAGE_BY_KEY[stageKey];
   if (!def) throw new Error(`Unknown stage: ${stageKey}`);
   if (def.runnable === false) throw new Error(`Stage ${stageKey} is human-only`);
+  const chainDrafts = opts?.chainDrafts ?? false;
 
   const data = await getProject(projectId);
   if (!data) throw new Error(`Project not found: ${projectId}`);
+
+  // An empty intake means every stage would invent the client from nothing and the
+  // output would look finished while being fiction. Fail loudly instead.
+  if (!data.intake?.rawText?.trim()) {
+    throw new Error(
+      `Project ${projectId} has an empty intake. Link it to a client whose onboarding ` +
+        `research is synced (npm run sync:knowledge), or add intake text. Refusing to ` +
+        `generate ${stageKey} from nothing.`,
+    );
+  }
   // Auto-create the row if this stage was added to the pipeline after the
   // project was created, so new stages work on existing projects.
   const stageRow = (await getStage(projectId, stageKey)) ?? (await ensureStage(projectId, def));
@@ -100,9 +113,9 @@ export async function runStage(
       return await runBrandKit(data, stageRow, feedback, operatorId);
     }
     if (stageKey === "webinar-slides") {
-      return await runSlides(data, def, stageRow, feedback, operatorId, clientContext);
+      return await runSlides(data, def, stageRow, feedback, operatorId, clientContext, chainDrafts);
     }
-    return await runProse(data, def, stageRow, feedback, operatorId, clientContext);
+    return await runProse(data, def, stageRow, feedback, operatorId, clientContext, chainDrafts, client);
   } catch (err) {
     // Restore a non-running status so the UI is not stuck.
     await saveStageOutput(stageRow.id, {
@@ -173,16 +186,33 @@ function buildSystem(
   return blocks;
 }
 
-function priorApprovedContext(data: ProjectWithStages): string {
-  // Every approved prior stage's output, locked. Skip intake (already injected
-  // separately) and brand-kit (structured data, injected where relevant).
+/**
+ * Every prior stage's output, locked, as context for this one. Skips intake (injected
+ * separately) and brand-kit (structured data, injected where relevant).
+ *
+ * `chainDrafts` exists for the unattended full-pipeline run. Normally only *approved*
+ * stages carry forward — the human gate is what promotes a draft into locked context.
+ * But a full run generates 17 stages back-to-back with nobody there to approve, so
+ * without this every stage after the first would generate blind: the script wouldn't
+ * know the blueprint, the slides wouldn't know the script. That defeats the chain,
+ * which is the entire point of the pipeline.
+ *
+ * The alternative — auto-approving each stage so the next one inherits it — would be
+ * worse: it marks work "human-approved" that no human has read. So an automated run
+ * chains on the latest output instead, and every stage still lands as a `draft`
+ * awaiting real review. Drafts are labelled as such in the prompt so a stage knows
+ * its foundation is unreviewed and may yet change.
+ */
+function priorApprovedContext(data: ProjectWithStages, chainDrafts = false): string {
   const parts: string[] = [];
   for (const s of data.stages) {
-    if (s.status !== "approved") continue;
+    const usable = s.status === "approved" || (chainDrafts && s.status === "draft");
+    if (!usable) continue;
     if (s.stageKey === "intake" || s.stageKey === "brand-kit") continue;
     if (!s.outputMd) continue;
     const def = STAGE_BY_KEY[s.stageKey];
-    parts.push(`## ${def?.label ?? s.stageKey}\n\n${s.outputMd}`);
+    const tag = s.status === "approved" ? "APPROVED" : "DRAFT — not yet human-reviewed";
+    parts.push(`## ${def?.label ?? s.stageKey} (${tag})\n\n${s.outputMd}`);
   }
   return parts.join("\n\n---\n\n");
 }
@@ -193,6 +223,7 @@ function buildUser(
   feedback: string | undefined,
   priorOutput: string | null,
   clientContext: string | null,
+  chainDrafts = false,
 ): string {
   const sections: string[] = [];
   sections.push(`Client: ${data.project.clientName}`);
@@ -201,7 +232,7 @@ function buildUser(
   }
   sections.push(`\n# Client intake (source of truth)\n${data.intake?.rawText ?? "(none)"}`);
 
-  const prior = priorApprovedContext(data);
+  const prior = priorApprovedContext(data, chainDrafts);
   if (prior) {
     sections.push(
       `\n# Prior approved stages — locked context, build on them, do not rewrite\n${prior}`,
@@ -285,46 +316,140 @@ async function runProse(
   feedback: string | undefined,
   operatorId: string | null | undefined,
   clientContext: string | null,
+  chainDrafts = false,
+  client: Client | null = null,
 ): Promise<RunResult> {
   if (!def.skillKey) throw new Error(`Stage ${def.key} has no skill`);
   const skill = await getSkill(def.skillKey);
   if (!skill) throw new Error(`Skill not seeded: ${def.skillKey}. Run npm run seed:skills.`);
 
   const system = buildSystem(skill.skillMd, skill.learningsMd, skill.examplesMd, skill.kbSkillMd);
-  const baseUser = buildUser(data, def, feedback, stageRow.outputMd, clientContext);
+  const baseUser = buildUser(data, def, feedback, stageRow.outputMd, clientContext, chainDrafts);
 
-  let text: string;
-  let score: GateScore | null = null;
-  let attempts = 1;
-
-  if (VOICE_GATED_STAGES.has(def.key)) {
-    const result = await runWithGate({
-      stageLabel: def.label,
-      userIntent: def.description,
-      maxAttempts: MAX_GATE_ATTEMPTS,
-      generate: async (retryFeedback) => {
-        const user = retryFeedback
-          ? `${baseUser}\n\n# Reviewer feedback to address\n${retryFeedback}`
-          : baseUser;
-        const { text } = await generate({ system, user, maxTokens: outputBudget(def.key) });
-        return stripFences(text);
-      },
-    });
-    text = result.text;
-    score = result.score;
-    attempts = result.attempts;
-  } else {
-    const { text: raw } = await generate({ system, user: baseUser, maxTokens: outputBudget(def.key) });
-    text = stripFences(raw);
-  }
-
-  // Rules for the post-delivery audit = the skill's method + learned corrections
-  // + craft rules/anchors. These carry the concrete checkable rules.
+  // Rules for the LLM audit (stages with no deterministic asset_type) = the
+  // skill's method + learned corrections + craft rules/anchors. These carry the
+  // concrete checkable rules (e.g. the webinar-title "no em dashes" hard-stop).
   const rules = [skill.skillMd, skill.kbSkillMd, skill.learningsMd, skill.examplesMd]
     .filter((s) => s && s.trim())
     .join("\n\n");
 
-  return finalize(stageRow, def, { outputMd: text, score, attempts }, feedback, operatorId, rules);
+  const { text, score, audit, attempts } = await generateWithGates({
+    def,
+    client,
+    rules,
+    maxAttempts: MAX_GATE_ATTEMPTS,
+    generate: async (retryFeedback) => {
+      const user = retryFeedback
+        ? `${baseUser}\n\n# Reviewer feedback to address\n${retryFeedback}`
+        : baseUser;
+      const { text } = await generate({ system, user, maxTokens: outputBudget(def.key) });
+      return stripFences(text);
+    },
+  });
+
+  return finalize(stageRow, def, { outputMd: text, score, attempts, audit }, feedback, operatorId);
+}
+
+/**
+ * The unified quality gate. Each attempt: generate a draft, then run every gate
+ * that applies to the stage — the editorial voice reviewer (voice-gated stages),
+ * and EITHER the deterministic copy auditor (stages mapped to an asset_type) OR
+ * the LLM rules audit (everything else, e.g. webinar-title). "Blocking" = any
+ * voice HIGH, any deterministic HARD, or any LLM-audit HIGH violation. When
+ * blocked and attempts remain, it folds the combined feedback into the prompt and
+ * REGENERATES automatically — no human in the loop. Issues that survive
+ * maxAttempts land on the draft, flagged.
+ *
+ * Every prose stage has at least the LLM audit, so violations always drive a
+ * rewrite; the deterministic auditor supersedes it wherever an asset_type exists.
+ */
+async function generateWithGates(opts: {
+  def: StageDef;
+  client: Client | null;
+  rules: string;
+  maxAttempts: number;
+  generate: (retryFeedback?: string) => Promise<string>;
+}): Promise<{ text: string; score: GateScore | null; audit: AuditResult | null; attempts: number }> {
+  const { def, client, rules, maxAttempts, generate } = opts;
+  const voiceGated = VOICE_GATED_STAGES.has(def.key);
+  const assetType = STAGE_ASSET_TYPE[def.key] ?? null;
+
+  let text = "";
+  let score: GateScore | null = null;
+  let audit: AuditResult | null = null;
+  let retryFeedback: string | undefined;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    text = await generate(retryFeedback);
+
+    const [voiceScore, deterministic] = await Promise.all([
+      voiceGated
+        ? reviewDraft({ stageLabel: def.label, userIntent: def.description, text })
+        : Promise.resolve(null),
+      assetType ? auditBundle({ markdown: text, assetType, client }) : Promise.resolve(null),
+    ]);
+
+    // Rich asset types (emails, title) have deep per-asset code rules — the
+    // deterministic auditor is authoritative and the LLM audit is redundant.
+    // Thin/unmapped stages have only the universal code rules, so the LLM audit
+    // runs alongside as a second BLOCKING gate (both drive rewrites) until their
+    // per-asset rules are authored. A downed auditor also falls back to the LLM.
+    const detAvailable = !!deterministic && deterministic.available;
+    const isRich = detAvailable && !!assetType && RICH_ASSET_TYPES.has(assetType);
+    const llmAudit: AuditResult | null = isRich
+      ? null
+      : await auditCopy({ stageLabel: def.label, rules, output: text });
+
+    score = voiceScore;
+    audit = mergeAudits(detAvailable ? (deterministic as CopyAuditReport) : null, llmAudit);
+
+    const voiceHighs = voiceScore ? voiceScore.violations.filter((v) => v.severity === "high") : [];
+    const detHard = detAvailable ? (deterministic as CopyAuditReport).hardViolations : [];
+    const llmHighs = llmAudit ? llmAudit.violations.filter((v) => v.severity === "high") : [];
+
+    const voiceCleared = !voiceScore || (voiceScore.passed && voiceScore.score >= PASS_THRESHOLD);
+    const blocked = voiceHighs.length > 0 || detHard.length > 0 || llmHighs.length > 0;
+    if ((!blocked && voiceCleared) || attempt === maxAttempts) {
+      return { text, score, audit, attempts: attempt };
+    }
+
+    const parts: string[] = [];
+    if (!voiceCleared && voiceScore) {
+      const toFix = voiceHighs.length ? voiceHighs : voiceScore.violations;
+      parts.push(
+        "Revise to fix these reviewer issues. Keep everything that worked; change only what these notes call out:\n" +
+          toFix.map((v) => `- (${v.severity}) ${v.note}`).join("\n"),
+      );
+    }
+    if (detHard.length) parts.push(hardViolationFeedback(deterministic as CopyAuditReport));
+    if (llmHighs.length) parts.push(auditRewriteFeedback(llmHighs));
+    retryFeedback = parts.join("\n\n");
+  }
+
+  return { text, score, audit, attempts: maxAttempts };
+}
+
+/** Combine the deterministic and LLM audit reports into one stored result. */
+function mergeAudits(a: AuditResult | null, b: AuditResult | null): AuditResult | null {
+  if (a && b) {
+    return {
+      passed: a.passed && b.passed,
+      summary: [a.summary, b.summary].filter(Boolean).join(" "),
+      violations: [...a.violations, ...b.violations],
+    };
+  }
+  return a ?? b ?? null;
+}
+
+/** Rewrite feedback from the LLM rules audit's high-severity violations. */
+function auditRewriteFeedback(highs: AuditResult["violations"]): string {
+  return (
+    "Fix these HARD rule violations from the QC audit. They block shipping — " +
+    "correct every one while keeping everything that already complies:\n" +
+    highs
+      .map((v) => `- [${v.rule}] ${v.evidence ? `“${v.evidence}” ` : ""}→ ${v.fix}`)
+      .join("\n")
+  );
 }
 
 // --- Brand kit (no LLM) ------------------------------------------------------
@@ -378,6 +503,7 @@ async function runSlides(
   feedback: string | undefined,
   operatorId: string | null | undefined,
   clientContext: string | null,
+  chainDrafts = false,
 ): Promise<RunResult> {
   const skill = await getSkill(def.skillKey ?? "webinar-slides");
   // Same knowledge stack as every prose stage — the deck anchors and the learned
@@ -390,7 +516,7 @@ async function runSlides(
     skill?.kbSkillMd ?? "",
     SLIDES_SYSTEM_PROMPT,
   );
-  const baseUser = buildUser(data, def, feedback, stageRow.outputMd, clientContext);
+  const baseUser = buildUser(data, def, feedback, stageRow.outputMd, clientContext, chainDrafts);
 
   const { data: parsed } = await generateJson<SlideDeck>({
     system,
@@ -454,13 +580,20 @@ function slideTitle(s: SlideDeck["slides"][number]): string {
 async function finalize(
   stageRow: Stage,
   def: StageDef,
-  out: { outputMd: string; score: GateScore | null; attempts: number },
+  out: { outputMd: string; score: GateScore | null; attempts: number; audit?: AuditResult | null },
   feedback: string | undefined,
   operatorId: string | null | undefined,
-  rules: string,
 ): Promise<RunResult> {
-  // Audit the delivered copy against the stage's concrete skill rules.
-  const audit = await auditCopy({ stageLabel: def.label, rules, output: out.outputMd });
+  // The audit was already computed inside the gate loop (deterministic auditor
+  // for mapped stages, LLM audit otherwise). Store it; do not re-run.
+  const audit: AuditResult | null = out.audit ?? null;
+
+  // gatePassed reflects every gate that applied: voice review and/or the audit.
+  const gateStates = [
+    out.score ? out.score.passed : null,
+    audit ? audit.passed : null,
+  ].filter((v): v is boolean => v !== null);
+  const gatePassed = gateStates.length ? gateStates.every(Boolean) : false;
 
   await archiveRevision(stageRow, feedback ?? null, operatorId ?? null);
   await saveStageOutput(stageRow.id, {
@@ -469,7 +602,7 @@ async function finalize(
     draftMd: stageRow.draftMd ?? out.outputMd,
     scoreJson: out.score,
     auditJson: audit,
-    gatePassed: out.score ? out.score.passed : false,
+    gatePassed,
     gateAttempts: out.attempts,
   });
   return {

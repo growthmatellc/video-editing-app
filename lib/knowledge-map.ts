@@ -54,6 +54,9 @@ export const KB_STAGE_SOURCES: Record<string, KbStageSource> = {
       "funnel-pages/jane-mukami-registration-page-v1.md",
       "funnel-pages/mindstrong-rachel-reclaim-registration-page-v1.md",
     ],
+    // The title IS a headline, so the shared headline/subject craft rules govern it.
+    // Without this the stage never loads references/craft/headline-and-subject-rules.md.
+    craft: ["headline-and-subject-rules.md"],
   },
   "webinar-script": {
     skills: ["slide-building", "scripting", "mechanism-ideation"],

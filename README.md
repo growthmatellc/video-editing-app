@@ -100,6 +100,29 @@ examples, no agency references). `npm run seed:skills` loads them into the `skil
 table, where `learningsMd` (overriding corrections) and `examplesMd` (quality bar)
 can grow over time and are injected ahead of every generation.
 
+## The copywriting auditor
+
+Mapped stages (see `STAGE_ASSET_TYPE` in `lib/pipeline.ts`) are QC'd by the real
+GrowthMate copywriting auditor — the deterministic Python rules from
+`growthmate-knowledge/skills/copywriting/auditor/`, run as a Vercel Python
+function at `/api/audit`. After each generation the auditor and the editorial
+voice reviewer run together; **HARD violations automatically trigger a rewrite**
+(no operator action) up to a small retry cap, then land the draft with any
+residual issues flagged. YELLOW violations warn only. Unmapped stages fall back
+to the lighter LLM audit in `lib/audit.ts`.
+
+The auditor code is **vendored** into `api/audit/_vendor/` from the KB checkout:
+
+```
+npm run vendor:auditor   # re-run whenever the KB's auditor rules change
+```
+
+`vercel dev` runs the Python function locally; `ANTHROPIC_API_KEY` powers its
+semantic (Claude-judge) rules and it degrades gracefully without one. The full
+content rules (e.g. Tom's no-em-dash T-7) engage only when a stage emits the
+auditor's expected bundle format — the relevant formatting craft is already
+synced into those stages.
+
 ## Deploy
 
 Target: Vercel. Set the same environment variables in the project settings, point

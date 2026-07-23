@@ -26,7 +26,34 @@ export interface GateResult {
   attempts: number;
 }
 
-const PASS_THRESHOLD = 80;
+export const PASS_THRESHOLD = 80;
+
+/**
+ * Score one draft against the editorial reviewer. Returns null if the reviewer
+ * call fails or returns unparseable JSON — callers treat null as "unscored,
+ * don't block". Shared by runWithGate and the unified gate loop in skill-executor.
+ */
+export async function reviewDraft(opts: {
+  stageLabel: string;
+  userIntent: string;
+  text: string;
+}): Promise<GateScore | null> {
+  try {
+    const { data } = await generateJson<GateScore>({
+      system: [{ text: reviewerSystem(opts.stageLabel, opts.userIntent), cache: true }],
+      user: `Review this draft and return the JSON verdict.\n\n---\n${opts.text}\n---`,
+      maxTokens: 1500,
+      model: REVIEW_MODEL,
+    });
+    return {
+      passed: !!data.passed,
+      score: typeof data.score === "number" ? data.score : 0,
+      violations: Array.isArray(data.violations) ? data.violations : [],
+    };
+  } catch {
+    return null;
+  }
+}
 
 function reviewerSystem(stageLabel: string, userIntent: string): string {
   return `You are a strict editorial reviewer for a single deliverable in a live-webinar funnel.
@@ -73,20 +100,8 @@ export async function runWithGate(opts: {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     lastText = await generate(retryFeedback);
 
-    let score: GateScore;
-    try {
-      const { data } = await generateJson<GateScore>({
-        system: [{ text: reviewerSystem(stageLabel, userIntent), cache: true }],
-        user: `Review this draft and return the JSON verdict.\n\n---\n${lastText}\n---`,
-        maxTokens: 1500,
-        model: REVIEW_MODEL,
-      });
-      score = {
-        passed: !!data.passed,
-        score: typeof data.score === "number" ? data.score : 0,
-        violations: Array.isArray(data.violations) ? data.violations : [],
-      };
-    } catch {
+    const scored = await reviewDraft({ stageLabel, userIntent, text: lastText });
+    if (!scored) {
       // If the reviewer call fails or returns unparseable JSON, do not block the
       // pipeline: accept the draft but record that it was not scored.
       return {
@@ -95,6 +110,7 @@ export async function runWithGate(opts: {
         attempts: attempt,
       };
     }
+    const score = scored;
 
     lastScore = score;
     const cleared = score.passed && score.score >= PASS_THRESHOLD;
