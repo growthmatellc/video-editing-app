@@ -12,31 +12,35 @@
 import type { AuditResult, AuditViolation } from "./audit";
 import type { Client } from "./db/schema";
 
-/** Asset types the auditor's rule modules understand (audit_bundle.py). */
+/** Asset types the auditor's rule modules understand (audit_bundle.py on main). */
 export type AuditorAssetType =
   | "email_sequence"
   | "email_launch"
   | "webinar_deck"
-  | "webinar_title"
   | "launch_copy"
+  | "funnel_pages"
   | "video_ads"
+  | "image_ads"
   | "sales_page"
   | "vsl"
-  | "organic_social"
-  | "image_ads"
-  | "offer_stack"
-  | "objection_qa";
+  | "organic_social";
 
 /**
- * Asset types with a substantial per-asset deterministic rule module. For these
- * the auditor is authoritative and the LLM audit is redundant. Everything else
- * ("thin" asset types) has only the universal rules in code, so the LLM audit
- * runs alongside as a second blocking gate until per-asset rules are authored.
+ * Asset types backed by a real per-asset rule module on main. For these the
+ * deterministic auditor is authoritative and the LLM audit is redundant, so a
+ * mapped stage runs deterministic-only. Stages left unmapped (STAGE_ASSET_TYPE
+ * = null) fall back to the LLM audit, which still drives the auto-rewrite loop.
  */
 export const RICH_ASSET_TYPES = new Set<AuditorAssetType>([
   "email_sequence",
   "email_launch",
-  "webinar_title",
+  "webinar_deck",
+  "launch_copy",
+  "funnel_pages",
+  "video_ads",
+  "image_ads",
+  "sales_page",
+  "organic_social",
 ]);
 
 export interface CopyAuditReport extends AuditResult {

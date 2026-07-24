@@ -160,25 +160,26 @@ export const PHASE_ORDER: StageDef["phase"][] = [
  * Types the auditor understands: email_sequence, email_launch, webinar_deck,
  * launch_copy, video_ads, sales_page, vsl, organic_social.
  */
+// Maps a stage to an auditor asset_type that has a REAL rule module on main.
+// A stage is mapped only where the deliverable's format matches an asset_type the
+// vendored auditor actually grades; everything else is null and uses the LLM
+// audit (which still drives the auto-rewrite loop). Notably main scopes title
+// rules to webinar_deck/funnel_pages and has no standalone webinar_title or vsl
+// module, so the title/script/offer/QA stages stay on the LLM audit for now.
 export const STAGE_ASSET_TYPE: Record<string, import("./copy-auditor").AuditorAssetType | null> = {
-  // The blueprint is the strategic brief, not a copy asset — excluded, per the
-  // "same process for all copywriting outputs BESIDES the brief" scope.
-  "webinar-blueprint": null,
-  "webinar-title": "webinar_title",
-  "webinar-script": "vsl",
-  // Slides render JSON->pptx via runSlides (not runProse), so this loop doesn't
-  // audit them; left null to avoid implying otherwise.
-  "webinar-slides": null,
-  "offer-stack": "offer_stack",
-  "registration-page": "sales_page",
+  "webinar-blueprint": null, // the strategic brief, not a copy asset
+  "webinar-title": null, // no standalone-title module on main; LLM audit
+  "webinar-script": null, // no vsl module on main; LLM audit
+  "webinar-slides": null, // rendered via runSlides, not this loop
+  "offer-stack": null,
+  "registration-page": "funnel_pages",
   "ad-creative": "video_ads",
   "image-ads": "image_ads",
-  "funnel-videos": "vsl",
+  "funnel-videos": null, // spoken scripts; no vsl module; LLM audit
   "email-sequences": "email_sequence",
   "sms-sequences": "email_sequence",
   "call-nurture": "email_sequence",
-  "objection-qa-bank": "objection_qa",
-  // Assembly/technical docs, not copy craft — stay on the LLM audit.
+  "objection-qa-bank": null,
   "designer-handoff": null,
   "funnel-spec": null,
   "tracking-setup": null,

@@ -21,6 +21,7 @@ from typing import List
 from skills.copywriting.auditor.lib.parser import BundleSection, ParsedBundle
 from skills.copywriting.auditor.lib.registry import Rule, HARD, YELLOW
 from skills.copywriting.auditor.lib.reporter import Violation
+from skills.copywriting.auditor.lib import sections as S
 
 
 LAYER = "Lauren"
@@ -34,24 +35,28 @@ APPLIES_TO = {"email_sequence", "email_launch"}
 BRACKET_PREFIX_RE = re.compile(r"^\s*\[[^\]]+\]\s*")
 
 def check_ue1_subject_line(bundle: ParsedBundle, ctx: dict) -> List[Violation]:
+    """≤7 words of content, on EVERY subject variant.
+
+    Emails now ship 2-3 subject options (SL-5). Checking only the first one would let a
+    15-word variant B through the cap — and variant B is one the operator might well ship.
+    """
     violations = []
     for section in bundle.emails:
-        if not section.subject:
-            continue
-        # Strip bracket workshop-name prefix (doesn't count toward 7-word limit)
-        content_only = BRACKET_PREFIX_RE.sub("", section.subject).strip()
-        word_count = len(content_only.split())
-        if word_count > 7:
-            violations.append(Violation(
-                rule_id="UE-1",
-                rule_name="subject line ≤7 words (excl. bracket prefix)",
-                severity=HARD,
-                section_id=section.section_id,
-                line_no=section.start_line,
-                line_content=section.subject,
-                message=f"Subject line content is {word_count} words (max 7, bracketed prefix excluded).",
-                fix_hint="Tighten subject. Concrete result, distinct hook. One-idea ad-style, not a sentence.",
-            ))
+        for line_no, subject in S.subject_variants(section):
+            # Strip bracket workshop-name prefix (doesn't count toward 7-word limit)
+            content_only = BRACKET_PREFIX_RE.sub("", subject).strip()
+            word_count = len(content_only.split())
+            if word_count > 7:
+                violations.append(Violation(
+                    rule_id="UE-1",
+                    rule_name="subject line ≤7 words (excl. bracket prefix)",
+                    severity=HARD,
+                    section_id=section.section_id,
+                    line_no=line_no,
+                    line_content=subject,
+                    message=f"Subject line content is {word_count} words (max 7, bracketed prefix excluded).",
+                    fix_hint="Tighten subject. Concrete result, distinct hook. One-idea ad-style, not a sentence.",
+                ))
     return violations
 
 
@@ -89,10 +94,16 @@ def check_ue2_body_formatting(bundle: ParsedBundle, ctx: dict) -> List[Violation
                     fix_hint="Change `*` to `-` or use `1. 2. 3.` numbered format.",
                 ))
     # Paragraph length: count consecutive non-blank lines per email and warn if any paragraph > 4 lines
+    #
+    # The `**Subject A:** / **Preview A:**` block is the email's HEADER, not its body — six
+    # metadata lines in a row are not a wall of text. Counting them flagged every email in a
+    # correctly-formatted bundle.
     for section in bundle.emails:
         paragraph_start = None
         consecutive_lines = 0
         for line_no, content in section.body_lines:
+            if S.SUBJECT_VARIANT_RE.match(content) or S.PREVIEW_VARIANT_RE.match(content):
+                continue
             if content.strip():
                 if paragraph_start is None:
                     paragraph_start = line_no
