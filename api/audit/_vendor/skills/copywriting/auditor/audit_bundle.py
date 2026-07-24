@@ -46,15 +46,13 @@ SUPPORTED_ASSET_TYPES = {
     "email_sequence",
     "email_launch",
     "webinar_deck",
-    "webinar_title",
     "launch_copy",
+    "funnel_pages",
     "video_ads",
+    "image_ads",
     "sales_page",
     "vsl",
     "organic_social",
-    "image_ads",
-    "offer_stack",
-    "objection_qa",
 }
 
 
@@ -63,6 +61,7 @@ def run_audit(
     asset_type: str,
     client_slug: str = None,
     skip_semantic: bool = False,
+    semantic_mode: str = "defer",
 ) -> AuditReport:
     """Run the full audit.
 
@@ -90,13 +89,17 @@ def run_audit(
     if client_slug:
         client_data = load_client(client_slug)
 
-    # Build context dict passed to every check function
+    # Build context dict passed to every check function. `pending_judgments` is the sink the
+    # semantic rules append to in defer mode (the default) instead of calling out to an LLM —
+    # the driving agent resolves them in a fresh judge context. See semantic.py.
     context = {
         "file_path": file_path,
         "asset_type": asset_type,
         "client_slug": client_slug,
         "client_data": client_data,
         "skip_semantic": skip_semantic,
+        "semantic_mode": semantic_mode,
+        "pending_judgments": [],
     }
 
     # Load and filter rules
@@ -128,6 +131,7 @@ def run_audit(
         )
         report.rule_results.append(result)
 
+    report.pending_judgments = context.get("pending_judgments", [])
     return report
 
 
@@ -160,7 +164,14 @@ def main():
     parser.add_argument(
         "--no-semantic",
         action="store_true",
-        help="Skip semantic (Claude-as-judge) rules · faster + no API cost",
+        help="Skip semantic (agent-judge) rules entirely · no judgments emitted",
+    )
+    parser.add_argument(
+        "--semantic-mode",
+        choices=["defer", "http"],
+        default="defer",
+        help="defer (default): emit semantic checks as pending_judgments for an agent to judge · "
+             "http: headless fallback that POSTs to Haiku (needs ANTHROPIC_API_KEY)",
     )
     args = parser.parse_args()
 
@@ -169,6 +180,7 @@ def main():
         asset_type=args.asset_type,
         client_slug=args.client,
         skip_semantic=args.no_semantic,
+        semantic_mode=args.semantic_mode,
     )
 
     if args.json:

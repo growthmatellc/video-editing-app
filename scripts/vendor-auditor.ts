@@ -45,7 +45,8 @@ function main() {
   // there's nothing else to bring along (no requirements.txt, no config YAML).
   cpSync(SRC, DEST, {
     recursive: true,
-    filter: (src) => !/__pycache__|\.pyc$|\.DS_Store/.test(src),
+    // Skip caches and the auditor's own test suite — never imported at runtime.
+    filter: (src) => !/__pycache__|\.pyc$|\.DS_Store|[/\\]tests[/\\]|[/\\]tests$/.test(src),
   });
 
   // Namespace parents. auditor/ + its lib/ and rules/ already ship __init__.py;

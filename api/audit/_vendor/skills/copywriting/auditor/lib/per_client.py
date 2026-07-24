@@ -20,6 +20,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from skills.copywriting.auditor.lib.term_mappings import RetiredTerm, normalize_mappings
+from skills.copywriting.auditor.lib.voice import VoiceRules, parse_voice_rules
+
 
 @dataclass
 class ClientData:
@@ -30,7 +33,16 @@ class ClientData:
     banned_phrases: List[str] = field(default_factory=list)
     locked_aha: Optional[str] = None
     mechanism_source_of_truth: Optional[str] = None
+    # True only when a ratified `name_canonical` + an attributed `name_canonical_locked_by` exist.
+    # False means the mechanism is still the onboarding DRAFT — usable as the operative name so copy
+    # stops re-deriving it, but provisional until a human (Lauren) locks it.
+    mechanism_locked: bool = False
+    primary_desire: Optional[str] = None
     available: bool = False  # whether the client folder was actually found
+    # The style guide's voice sections, sorted into what can be matched vs. judged.
+    voice: Optional[VoiceRules] = None
+    # Retired terminology, normalized out of the nine live term-mappings shapes.
+    retired_terms: List[RetiredTerm] = field(default_factory=list)
 
     @property
     def display_name(self) -> str:
@@ -103,45 +115,37 @@ def load_client(slug: str, clients_root: Optional[Path] = None) -> ClientData:
             pass
 
     # Extract structured fields from style-guide and info
-    data.banned_phrases = _extract_banned_phrases(data.style_guide_text, data.info)
+    data.voice = parse_voice_rules(slug, data.style_guide_text)
+    data.retired_terms = normalize_mappings(data.term_mappings)
+    data.banned_phrases = _extract_banned_phrases(data.style_guide_text, data.info, data.voice)
     data.locked_aha = _extract_locked_aha(data.info, data.style_guide_text)
     data.mechanism_source_of_truth = _extract_mechanism(data.info, data.style_guide_text)
+    data.mechanism_locked = _mechanism_is_locked(data.info)
+    data.primary_desire = _extract_desire(data.info)
 
     return data
 
 
-def _extract_banned_phrases(style_guide: str, info: dict) -> List[str]:
-    """Pull banned phrases from style-guide.md banned-phrases section + info.json."""
-    phrases = []
+def _extract_banned_phrases(style_guide: str, info: dict, voice: VoiceRules) -> List[str]:
+    """Literal banned phrases: the quoted terms the style guide enumerates, plus info.json.
 
-    # info.json may have a "banned_phrases" list
+    Rewritten 2026-07-16. The previous version grepped style-guide.md for `## Banned phrases`
+    / `## Banned patterns` / `## Banned words` / `## Do NOT use` — **none of which appear in
+    any of the 22 client style guides.** Every guide writes `## Off-brand phrases` and
+    `## Don'ts`. So this returned info.json's list, which exists for one real client, and
+    PC-1 — a HARD rule — loaded an empty list and passed silently for everyone else.
+
+    Parsing now lives in lib/voice.py, which also keeps the two things that must NOT end up
+    here: prose categories ("Passive voice") that only a judge can see, and rules the guide
+    has retracted. See that module for why a naive heading fix would have been worse than
+    the bug.
+    """
+    phrases = list(voice.banned_literals) if voice else []
+
+    # info.json may carry an explicit banned_phrases list · it wins nothing, it just adds.
     if isinstance(info.get("banned_phrases"), list):
-        phrases.extend(info["banned_phrases"])
+        phrases.extend(p for p in info["banned_phrases"] if isinstance(p, str))
 
-    # Parse style-guide.md for a "## Banned phrases" or "## Banned patterns" section
-    if style_guide:
-        # Match section headers and content until next H2 or end
-        patterns = [
-            r"##\s+Banned\s+phrases\s*\n(.*?)(?=\n##\s|\Z)",
-            r"##\s+Banned\s+patterns\s*\n(.*?)(?=\n##\s|\Z)",
-            r"##\s+Banned\s+words\s*\n(.*?)(?=\n##\s|\Z)",
-            r"##\s+Do\s+NOT\s+use\s*\n(.*?)(?=\n##\s|\Z)",
-        ]
-        for pat in patterns:
-            match = re.search(pat, style_guide, re.IGNORECASE | re.DOTALL)
-            if match:
-                section = match.group(1)
-                # Extract bullet items (- foo) and quoted strings
-                for line in section.splitlines():
-                    line = line.strip()
-                    if line.startswith("-") or line.startswith("*"):
-                        item = line.lstrip("-* ").strip()
-                        # Strip quotes
-                        item = item.strip('"\'').strip("`")
-                        if item:
-                            phrases.append(item)
-
-    # Dedupe, case-preserve
     seen = set()
     out = []
     for p in phrases:
@@ -177,13 +181,52 @@ def _extract_mechanism(info: dict, style_guide: str) -> Optional[str]:
     if isinstance(raw, str):
         return raw
     if isinstance(raw, dict):
-        # Try canonical name fields in order
-        for key in ("name_canonical", "name", "canonical_name", "mechanism_name"):
+        # Ratified (locked) name first; then the onboarding DRAFT, so copy reads the researched
+        # name instead of re-deriving it. `mechanism_locked` records which one this was.
+        for key in ("name_canonical", "name", "canonical_name", "mechanism_name", "name_canonical_draft"):
             value = raw.get(key)
-            if isinstance(value, str) and value.strip():
+            if isinstance(value, str) and value.strip() and "not found" not in value.lower():
                 return value.strip()
     if style_guide:
         match = re.search(r"##\s+Mechanism[\s:]*\n+([^\n]+)", style_guide, re.IGNORECASE)
         if match:
             return match.group(1).strip().strip("`*").strip()
+    return None
+
+
+def _mechanism_is_locked(info: dict) -> bool:
+    """True only when the mechanism is RATIFIED — a canonical name plus an attributed lock.
+
+    A bare string mechanism (`"mechanism": "Volume Eating"`) is treated as settled. The structured
+    schema is locked only when a `name_canonical` exists AND `name_canonical_locked_by` names who
+    ratified it — a draft with `name_canonical_draft` and a null `locked_by` is NOT locked. (The
+    2026-07-13 Holy Health revert: never treat an unattributed/inferred lock as real.)
+    """
+    raw = info.get("mechanism") or info.get("mechanism_name")
+    if isinstance(raw, str):
+        return bool(raw.strip())
+    if isinstance(raw, dict):
+        has_canonical = any(
+            isinstance(raw.get(k), str) and raw.get(k, "").strip()
+            for k in ("name_canonical", "name", "canonical_name", "mechanism_name")
+        )
+        locked_by = raw.get("name_canonical_locked_by")
+        return bool(has_canonical and isinstance(locked_by, str) and locked_by.strip())
+    return False
+
+
+def _extract_desire(info: dict) -> Optional[str]:
+    """The audience's PRIMARY DESIRE — the outcome they actually want.
+
+    Lives in info.json under avatar_snapshot.primary_desire. Until 2026-07-13 no client
+    declared it anywhere machine-readable: it sat in the TAB PDF and in people's heads, so
+    every writer assumed it, and a title could name a desire the avatar solved years ago
+    while passing every mechanical check.
+    """
+    avatar = info.get("avatar_snapshot") or info.get("avatar") or {}
+    if isinstance(avatar, dict):
+        for key in ("primary_desire", "core_desire", "desired_outcome"):
+            value = avatar.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
     return None

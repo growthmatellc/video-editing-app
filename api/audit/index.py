@@ -1,26 +1,30 @@
 """Vercel Python function — POST /api/audit.
 
-Runs the vendored GrowthMate copywriting auditor (deterministic Tom/Alec/Lauren/
-formatting/ops rules + Claude-as-judge semantic rules) against a generated copy
-bundle, and returns the structured JSON report.
+Runs the vendored GrowthMate copywriting auditor against a generated copy bundle
+and returns the structured JSON report.
 
 The vendored rule logic is UNCHANGED from growthmate-knowledge (see
-scripts/vendor-auditor.ts). This handler only adapts the two on-disk couplings:
+scripts/vendor-auditor.ts). This handler adapts three things for in-app use:
   - the parser reads a file path      -> we write the request body to a temp file
   - load_client() walks the FS        -> we build ClientData from the request body
                                          (the app already holds it in Postgres)
+  - semantic rules DEFER to an agent   -> they emit `pending_judgments`; this
+    handler is the "driving agent" and resolves each one with a Haiku judge,
+    injecting any FAIL as a normal violation (so the TS client needs no change).
 
 Request body: { "markdown": str, "asset_type": str,
                 "client"?: { slug, info?, style_guide?, term_mappings? },
                 "skip_semantic"?: bool }
-Response: the auditor's format_json_report() payload (passed, exit_code,
-          summary{hard_violations, yellow_violations, ...}, rule_results[]).
+Response: the auditor's format_json_report() payload.
 """
 from http.server import BaseHTTPRequestHandler
 import json
 import os
 import sys
 import tempfile
+import urllib.request
+import urllib.error
+from pathlib import Path
 
 # The vendored tree preserves skills/copywriting/auditor/, so this dir is the
 # import root for the module's absolute `from skills.copywriting.auditor...`.
@@ -36,48 +40,74 @@ from skills.copywriting.auditor.lib.registry import (  # noqa: E402
 from skills.copywriting.auditor.lib.reporter import (  # noqa: E402
     AuditReport,
     RuleResult,
+    Violation,
     format_json_report,
 )
-from skills.copywriting.auditor.lib.per_client import (  # noqa: E402
-    ClientData,
-    _extract_banned_phrases,
-    _extract_locked_aha,
-    _extract_mechanism,
-)
-
-SUPPORTED_ASSET_TYPES = {
-    "email_sequence", "email_launch", "webinar_deck", "webinar_title",
-    "launch_copy", "video_ads", "sales_page", "vsl", "organic_social",
-    "image_ads", "offer_stack", "objection_qa",
-}
+from skills.copywriting.auditor.lib.per_client import load_client  # noqa: E402
+# Track the auditor's own supported set so the app never drifts from the vendor.
+from skills.copywriting.auditor.audit_bundle import SUPPORTED_ASSET_TYPES  # noqa: E402
 
 # The Ops layer audits the KB's Drive-upload workflow (filenames, output paths),
 # not the copy itself — irrelevant to in-app generation, so we never run it here.
 SKIP_LAYERS = {"Ops"}
+# Haiku judge for deferred semantic checks. Override with AUDITOR_JUDGE_MODEL.
+JUDGE_MODEL = os.environ.get("AUDITOR_JUDGE_MODEL", "claude-haiku-4-5-20251001")
 
 
 def _client_data_from_payload(payload):
-    """Build a ClientData from the app's injected client fields (Postgres),
-    mirroring load_client() but without touching the filesystem."""
+    """Build a ClientData from the app's injected client fields (Postgres). We
+    materialize them into a throwaway clients/<slug>/ dir and call the auditor's
+    OWN load_client, so we inherit its exact parsing (voice, banned phrases,
+    primary_desire, mechanism) and never drift from the vendored version."""
     if not payload:
         return None
     slug = payload.get("slug") or "unknown"
-    info = payload.get("info") or {}
-    style_guide = payload.get("style_guide") or ""
-    term_mappings = payload.get("term_mappings") or {}
-    data = ClientData(slug=slug, available=True)
-    data.info = info if isinstance(info, dict) else {}
-    data.term_mappings = term_mappings if isinstance(term_mappings, dict) else {}
-    data.style_guide_text = style_guide
-    data.banned_phrases = _extract_banned_phrases(data.style_guide_text, data.info)
-    data.locked_aha = _extract_locked_aha(data.info, data.style_guide_text)
-    data.mechanism_source_of_truth = _extract_mechanism(data.info, data.style_guide_text)
-    return data
+    info = payload.get("info") if isinstance(payload.get("info"), dict) else {}
+    term_mappings = payload.get("term_mappings") if isinstance(payload.get("term_mappings"), dict) else {}
+    with tempfile.TemporaryDirectory() as tmp:
+        cdir = os.path.join(tmp, "clients", slug)
+        os.makedirs(cdir, exist_ok=True)
+        with open(os.path.join(cdir, "info.json"), "w", encoding="utf-8") as f:
+            json.dump(info, f)
+        with open(os.path.join(cdir, "style-guide.md"), "w", encoding="utf-8") as f:
+            f.write(payload.get("style_guide") or "")
+        with open(os.path.join(cdir, "term-mappings.json"), "w", encoding="utf-8") as f:
+            json.dump(term_mappings, f)
+        # load_client reads everything into the returned object during this call.
+        return load_client(slug, clients_root=Path(tmp) / "clients")
+
+
+def _judge(prompt):
+    """Resolve one deferred judgment with a Haiku judge. Returns 'PASS' | 'FAIL'.
+    Fails OPEN (PASS) when the key is missing or the call errors — a judge we
+    can't reach must never manufacture a blocking violation."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return "PASS"
+    body = json.dumps({
+        "model": JUDGE_MODEL,
+        "max_tokens": 200,
+        "system": 'You are a strict QC judge. Read the rubric and copy, then reply with ONLY {"verdict":"PASS"} or {"verdict":"FAIL"}. No prose.',
+        "messages": [{"role": "user", "content": prompt}],
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages", data=body, method="POST",
+        headers={"Content-Type": "application/json", "x-api-key": api_key,
+                 "anthropic-version": "2023-06-01"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        text = "".join(b.get("text", "") for b in payload.get("content", []) if b.get("type") == "text")
+        return "FAIL" if '"fail"' in text.lower() or "fail" in text.lower()[:40] else "PASS"
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, KeyError):
+        return "PASS"
 
 
 def _run(markdown, asset_type, client_data, skip_semantic):
-    """Mirror audit_bundle.run_audit() but from an in-memory string + injected
-    client_data (no load_client, no client-folder lookup)."""
+    """Run the vendored rules from an in-memory string + injected client_data.
+    Mechanical rules produce violations; semantic rules emit pending_judgments,
+    which we then resolve with a Haiku judge and fold in as violations."""
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
         f.write(markdown)
         tmp_path = f.name
@@ -95,14 +125,11 @@ def _run(markdown, asset_type, client_data, skip_semantic):
         "client_slug": client_data.slug if client_data else None,
         "client_data": client_data,
         "skip_semantic": skip_semantic,
+        "pending_judgments": [],
     }
 
     applicable = filter_rules_for_asset_type(load_all_rules(), asset_type)
-    report = AuditReport(
-        file_path="(request)",
-        asset_type=asset_type,
-        client_slug=context["client_slug"],
-    )
+    report = AuditReport(file_path="(request)", asset_type=asset_type, client_slug=context["client_slug"])
     for rule in applicable:
         if rule.layer in SKIP_LAYERS:
             continue
@@ -117,6 +144,22 @@ def _run(markdown, asset_type, client_data, skip_semantic):
             rule_id=rule.id, rule_name=rule.name, severity=rule.severity,
             layer=rule.layer, violations=violations or [],
         ))
+
+    # Resolve deferred semantic judgments (the app is the driving agent) and fold
+    # FAILs back in as normal violations. skip_semantic never emits pendings.
+    for p in context["pending_judgments"]:
+        if _judge(p.prompt) != "FAIL":
+            continue
+        report.rule_results.append(RuleResult(
+            rule_id=p.rule_id, rule_name=p.rule_name, severity=p.severity, layer=p.layer,
+            violations=[Violation(
+                rule_id=p.rule_id, rule_name=p.rule_name, severity=p.severity,
+                section_id=p.section_id, line_no=p.line_no, line_content=p.line_content,
+                message=f"Judge: fails {p.rule_id} ({p.rule_name}).",
+                fix_hint="Revise so this rule passes.",
+            )],
+        ))
+    report.pending_judgments = []  # all resolved above
     return report
 
 
@@ -148,10 +191,8 @@ class handler(BaseHTTPRequestHandler):
 
         client_data = _client_data_from_payload(payload.get("client"))
         skip_semantic = bool(payload.get("skip_semantic"))
-
         try:
             report = _run(markdown, asset_type, client_data, skip_semantic)
         except Exception as e:
             return self._send(500, {"error": f"audit failed: {e}"})
-
         return self._send(200, json.loads(format_json_report(report)))

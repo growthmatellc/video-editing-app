@@ -34,17 +34,19 @@ class Rule:
 
 # Module paths to discover
 RULE_MODULES = [
-    "skills.copywriting.auditor.rules.universal",
     "skills.copywriting.auditor.rules.tom",
     "skills.copywriting.auditor.rules.alec",
     "skills.copywriting.auditor.rules.lauren",
     "skills.copywriting.auditor.rules.formatting",
     "skills.copywriting.auditor.rules.ops",
     "skills.copywriting.auditor.rules.webinar_deck",
-    "skills.copywriting.auditor.rules.webinar_title",
     "skills.copywriting.auditor.rules.launch_copy",
+    "skills.copywriting.auditor.rules.funnel_pages",
     "skills.copywriting.auditor.rules.video_ads",
+    "skills.copywriting.auditor.rules.image_ads",
     "skills.copywriting.auditor.rules.sales_page",
+    "skills.copywriting.auditor.rules.organic_social",
+    "skills.copywriting.auditor.rules.headlines",
     "skills.copywriting.auditor.rules.per_client",
     "skills.copywriting.auditor.rules.semantic",
 ]
