@@ -21,9 +21,10 @@ import {
   ensureStage,
   archiveRevision,
   saveStageOutput,
+  buildIntake,
   type ProjectWithStages,
 } from "./project-store";
-import type { Client } from "./db/schema";
+import type { Client, Intake } from "./db/schema";
 import { scrapeBrandKit, brandKitToMarkdown, extractUrl, parseColorOverrides } from "./brand-kit";
 import {
   SLIDES_SYSTEM_PROMPT,
@@ -87,23 +88,37 @@ export async function runStage(
   const data = await getProject(projectId);
   if (!data) throw new Error(`Project not found: ${projectId}`);
 
-  // An empty intake means every stage would invent the client from nothing and the
-  // output would look finished while being fiction. Fail loudly instead.
-  if (!data.intake?.rawText?.trim()) {
-    throw new Error(
-      `Project ${projectId} has an empty intake. Link it to a client whose onboarding ` +
-        `research is synced (npm run sync:knowledge), or add intake text. Refusing to ` +
-        `generate ${stageKey} from nothing.`,
-    );
-  }
-  // Auto-create the row if this stage was added to the pipeline after the
-  // project was created, so new stages work on existing projects.
-  const stageRow = (await getStage(projectId, stageKey)) ?? (await ensureStage(projectId, def));
-
   // Load the linked knowledge-base client (if any) once; its profile, style
   // guide, and retired-term rules become locked context for every stage.
   const client = data.project.clientSlug ? await getClient(data.project.clientSlug) : null;
   const clientContext = client ? buildClientContext(client) : null;
+
+  // The project's own intake wins (it may carry launch-specific operator notes),
+  // but if it's empty we fall back to the linked client's synced onboarding
+  // research LIVE — so a project linked to a known client always has knowledge to
+  // build from, even when its intake snapshot was never populated (e.g. the client
+  // was synced after the project was created). This also always uses the latest
+  // research rather than a stale snapshot.
+  const projectIntake = data.intake?.rawText?.trim() ?? "";
+  const effectiveIntake = projectIntake || buildIntake(client, "");
+  if (!effectiveIntake.trim()) {
+    throw new Error(
+      `Project ${projectId} has no intake and ` +
+        (client
+          ? `client "${client.slug}" has no synced onboarding research (run npm run sync:knowledge)`
+          : `is not linked to a client`) +
+        `. Add intake text or link a synced client. Refusing to generate ${stageKey} from nothing.`,
+    );
+  }
+  // Make downstream prompt assembly see the effective intake.
+  data.intake = {
+    ...(data.intake ?? { projectId, fields: {}, submittedAt: new Date() }),
+    rawText: effectiveIntake,
+  } as Intake;
+
+  // Auto-create the row if this stage was added to the pipeline after the
+  // project was created, so new stages work on existing projects.
+  const stageRow = (await getStage(projectId, stageKey)) ?? (await ensureStage(projectId, def));
 
   // Mark running.
   await saveStageOutput(stageRow.id, { status: "running" });
