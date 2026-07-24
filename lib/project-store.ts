@@ -33,7 +33,7 @@ import { WEBINAR_PIPELINE, type StageDef } from "./pipeline";
  * Open gates ride along as hard constraints so a stage can't quietly invent an
  * answer to a question /onboard deliberately left for a human.
  */
-function buildIntake(client: Client | null, operatorText: string): string {
+export function buildIntake(client: Client | null, operatorText: string): string {
   const note = operatorText.trim();
   if (!client?.onboardingMd.trim()) {
     // No research on file — the operator's text is all we have. An empty intake here
