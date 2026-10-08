@@ -34,6 +34,8 @@ import {
 } from "./slide-deck-schema";
 import { renderDeck } from "./slide-renderer";
 import type { Stage } from "./db/schema";
+import { runVideoEdit } from "./video-edit/run";
+import type { VideoEditRequest } from "./video-edit/types";
 
 const MAX_GATE_ATTEMPTS = 2;
 
@@ -68,6 +70,7 @@ export interface RunResult {
   stageKey: string;
   status: Stage["status"];
   outputMd: string;
+  outputMeta?: Record<string, unknown> | null;
   score?: GateScore | null;
   audit?: AuditResult | null;
   error?: string;
@@ -78,7 +81,7 @@ export async function runStage(
   stageKey: string,
   feedback?: string,
   operatorId?: string | null,
-  opts?: { chainDrafts?: boolean },
+  opts?: { chainDrafts?: boolean; videoEdit?: VideoEditRequest },
 ): Promise<RunResult> {
   const def = STAGE_BY_KEY[stageKey];
   if (!def) throw new Error(`Unknown stage: ${stageKey}`);
@@ -101,7 +104,8 @@ export async function runStage(
   // research rather than a stale snapshot.
   const projectIntake = data.intake?.rawText?.trim() ?? "";
   const effectiveIntake = projectIntake || buildIntake(client, "");
-  if (!effectiveIntake.trim()) {
+  // Video edit's source of truth is the uploaded footage, not the webinar intake.
+  if (stageKey !== "video-edit" && !effectiveIntake.trim()) {
     throw new Error(
       `Project ${projectId} has no intake and ` +
         (client
@@ -126,6 +130,9 @@ export async function runStage(
   try {
     if (stageKey === "brand-kit") {
       return await runBrandKit(data, stageRow, feedback, operatorId);
+    }
+    if (stageKey === "video-edit") {
+      return await runVideoEdit(data, stageRow, feedback, operatorId, opts?.videoEdit);
     }
     if (stageKey === "webinar-slides") {
       return await runSlides(data, def, stageRow, feedback, operatorId, clientContext, chainDrafts);

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getProject } from "@/lib/project-store";
 import { Studio, type StudioStage } from "@/components/Studio";
+import { videoEditEnv } from "@/lib/video-edit/run";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,8 @@ export default async function ProjectPage({
       status={data.project.status}
       intakeText={data.intake?.rawText ?? ""}
       initialStages={stages}
+      blobUploadEnabled={videoEditEnv().blobUploadEnabled}
+      transcriptionConfigured={videoEditEnv().transcriptionConfigured}
     />
   );
 }
