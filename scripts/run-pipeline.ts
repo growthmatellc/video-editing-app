@@ -62,6 +62,15 @@ async function main() {
     }
     todo = todo.filter((s) => s.order <= stop.order);
   }
+  if (!only) {
+    const skipped = todo.filter((s) => s.media);
+    if (skipped.length) {
+      console.log(
+        `Skipping media stages (upload footage in the app, then run them there): ${skipped.map((s) => s.label).join(", ")}`,
+      );
+    }
+    todo = todo.filter((s) => !s.media);
+  }
 
   console.log(`\nProject : ${data.project.clientName} (${projectId})`);
   console.log(`Client  : ${data.project.clientSlug ?? "— none linked —"}`);

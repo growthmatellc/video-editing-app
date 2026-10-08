@@ -6,6 +6,7 @@ export interface StageDef {
   order: number;
   phase: "intake" | "content" | "funnel" | "launch-config";
   runnable?: boolean;        // false = human-only (intake). Default true.
+  media?: boolean;           // true = needs an uploaded file; skipped by the unattended runner
 }
 
 export const WEBINAR_PIPELINE: StageDef[] = [
@@ -76,46 +77,52 @@ export const WEBINAR_PIPELINE: StageDef[] = [
     skillKey: "funnel-videos", order: 11, phase: "funnel", runnable: true,
   },
   {
+    key: "video-edit",
+    label: "Video Edit",
+    description: "Upload raw footage and get a transcript, an auto-cut (dead air, fillers, retakes), a captioned preview, and a DaVinci Resolve handoff (FCPXML, EDL, SRT). Vertical 9:16 for short-form ads, funnel videos, and talking-head social.",
+    skillKey: "video-edit", order: 12, phase: "funnel", runnable: true, media: true,
+  },
+  {
     key: "email-sequences",
     label: "Email Sequences",
     description: "Confirmation, show-up reminder sequence (the indoctrination runway), live 'we're on' email, replay/no-show recovery, and post-webinar cart-close sequence.",
-    skillKey: "email-sequences", order: 12, phase: "launch-config", runnable: true,
+    skillKey: "email-sequences", order: 13, phase: "launch-config", runnable: true,
   },
   {
     key: "sms-sequences",
     label: "SMS Sequences",
     description: "Show-up reminders, the going-live alert, and replay nudges. Short, high-deliverability copy.",
-    skillKey: "sms-sequences", order: 13, phase: "launch-config", runnable: true,
+    skillKey: "sms-sequences", order: 14, phase: "launch-config", runnable: true,
   },
   {
     key: "call-nurture",
     label: "Call Nurture Sequence",
     description: "Post-booking appointment-nurture: the emails + SMS that fire when a prospect books the 1-on-1 Strategy Session, to drive call show-up, frame the conversation, and pre-qualify. Separate from the webinar emails.",
-    skillKey: "call-nurture", order: 14, phase: "launch-config", runnable: true,
+    skillKey: "call-nurture", order: 15, phase: "launch-config", runnable: true,
   },
   {
     key: "objection-qa-bank",
     label: "Objection & Q&A Bank",
     description: "The live close toolkit: top objections with reframes, and a seeded Q&A bank the presenter works through while the cart is open.",
-    skillKey: "objection-qa-bank", order: 15, phase: "launch-config", runnable: true,
+    skillKey: "objection-qa-bank", order: 16, phase: "launch-config", runnable: true,
   },
   {
     key: "designer-handoff",
     label: "Designer Handoff",
     description: "Consolidated build document for the funnel designer: registration page, thank-you/confirmation page, live room, replay page, and checkout, with all approved copy in place.",
-    skillKey: "designer-handoff", order: 16, phase: "launch-config", runnable: true,
+    skillKey: "designer-handoff", order: 17, phase: "launch-config", runnable: true,
   },
   {
     key: "funnel-spec",
     label: "Funnel Spec",
     description: "Technical build brief: webinar platform wiring (registration -> reminders -> live/replay -> checkout), automations, and integrations for the contractor.",
-    skillKey: "funnel-spec", order: 17, phase: "launch-config", runnable: true,
+    skillKey: "funnel-spec", order: 18, phase: "launch-config", runnable: true,
   },
   {
     key: "tracking-setup",
     label: "Tracking Setup",
     description: "Pixel events, UTM structure, and a registration -> show -> stay -> buy tracking sheet.",
-    skillKey: "tracking-setup", order: 18, phase: "launch-config", runnable: true,
+    skillKey: "tracking-setup", order: 19, phase: "launch-config", runnable: true,
   },
 ];
 
@@ -176,6 +183,7 @@ export const STAGE_ASSET_TYPE: Record<string, import("./copy-auditor").AuditorAs
   "ad-creative": "video_ads",
   "image-ads": "image_ads",
   "funnel-videos": null, // spoken scripts; no vsl module; LLM audit
+  "video-edit": null, // captions are the transcript, not ad copy — the auditor stays out
   "email-sequences": "email_sequence",
   "sms-sequences": "email_sequence",
   "call-nurture": "email_sequence",

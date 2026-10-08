@@ -66,7 +66,8 @@ environment variables and `theme/tokens.ts`.
 ## How the pipeline works
 
 1. **Create a project** (`/new`) from a client name and a pasted intake. The intake
-   is the single source of truth and is stored approved. All 14 stages are seeded.
+   is the single source of truth and is stored approved. Every stage in
+   `lib/pipeline.ts` is seeded.
 2. **Run a stage.** The executor (`lib/skill-executor.ts`) loads the stage's skill,
    the intake, and every **approved** prior stage as locked context, then calls the
    LLM. Voice-sensitive stages run through a generate-score-retry **review gate**
@@ -79,10 +80,70 @@ environment variables and `theme/tokens.ts`.
      the URL into the feedback box if it is not in the intake.
    - **Webinar Slides** returns typed `SlideDeck` JSON, injects the approved brand
      kit, and renders a downloadable `.pptx`.
+   - **Video Edit** cuts an uploaded clip and exports a DaVinci Resolve handoff.
+     See below. It does not use the copywriting auditor — captions are the transcript.
 
-Stages: Intake → Brand Kit → Blueprint → Script → Slides → Offer Stack →
-Registration Page → Ad Creative → Email Sequences → SMS Sequences →
-Objection & Q&A Bank → Designer Handoff → Funnel Spec → Tracking Setup.
+The ordered stage list lives in `lib/pipeline.ts`. New projects are seeded with
+every stage. Opening an existing project shows any stage added later; running it
+creates the missing row.
+
+## Video Edit
+
+Operators use this stage for three deliveries, all vertical 9:16 by default:
+short-form ads (15–60s), funnel videos (webinar invite / call confirmation), and
+talking-head organic social. Landscape is offered only when the upload is clearly
+landscape and the operator picks it.
+
+1. Upload an `.mp4` or `.mov`.
+2. Run the stage. It transcribes (Deepgram, AssemblyAI, or OpenAI — whichever key
+   is set), then removes dead air, filler words, and obvious retakes. The cut list
+   on the stage shows every removed range and why.
+3. Review the captioned proxy in the browser. Caption color comes from the
+   approved Brand Kit accent (then primary). With no approved kit, captions are
+   white with a black outline. Approve, or reject with a note such as `tighter`,
+   `looser`, `silence:0.8`, `keep fillers`, or `keep retakes`.
+4. Download the preview `.mp4` or the Resolve handoff `.zip`.
+
+Without a transcription key the stage still cuts silences ffmpeg can hear, and it
+tells you fillers and retakes were skipped. Paste a timestamped transcript (SRT,
+WebVTT, or `0.10 0.40 Hello` lines) to supply word times instead.
+
+Local check without the database:
+
+```bash
+npm test
+```
+
+`ffmpeg` must be on PATH (or `FFMPEG_PATH`). The render test builds a 5-second
+clip, cuts it, and checks the proxy is 720×1280.
+
+### Handoff to DaVinci on the Mac mini
+
+The web app does not drive Resolve. The zip is the handoff. Unzip it **directly**
+into the folder named in `HANDOFF.txt` (by default
+`/Users/Shared/WebinarStudio/handoff`, using `NEXT_PUBLIC_APP_NAME` with spaces
+removed). The source file, `edit.fcpxml`, `edit.edl`, and `captions.srt` should
+sit in that folder, not inside an extra nested folder.
+
+1. Open DaVinci Resolve and create or open the project.
+2. **File > Import > Timeline…** (Shift-Command-I) and choose `edit.fcpxml`.
+   Leave “Automatically import source clips into media pool” on.
+3. The timeline is a straight cut of the original frames (FCPXML 1.9, which
+   Resolve on Mac imports; newer `.fcpxmld` bundles are not what we export).
+   The browser mp4 is only a review proxy. For vertical delivery, set the
+   timeline to 1080×1920 and clip scaling to Fill, then reframe.
+4. If a clip is offline, right-click it in the Media Pool, **Relink Selected
+   Clips**, and choose the drop folder.
+5. With the cut timeline open, **File > Import > Subtitle…** and choose
+   `captions.srt`. Those cues start at the first frame of the cut, not the raw
+   camera file. Style the subtitle track with the brand color and font listed in
+   `HANDOFF.txt`.
+
+If FCPXML will not open: import the source into the Media Pool, right-click that
+clip, and choose **Timelines > Import > Pre-conformed EDL**, then select
+`edit.edl` (reel name `STUDIO`). Import the SRT the same way as above.
+
+B-roll, music beds, and multi-cam are not in this handoff.
 
 ## Rebranding (make it theirs)
 

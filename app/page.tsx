@@ -63,7 +63,13 @@ export default async function HomePage() {
         ) : (
           <ul className="grid gap-4 sm:grid-cols-2">
             {projects.map(({ project, stages }) => {
-              const approved = stages.filter((s) => s.status === "approved").length;
+              const byKey = new Map(stages.map((s) => [s.stageKey, s]));
+              const strip = WEBINAR_PIPELINE.map((def) => ({
+                stageKey: def.key,
+                stageOrder: def.order,
+                status: byKey.get(def.key)?.status ?? ("not_started" as const),
+              }));
+              const approved = strip.filter((s) => s.status === "approved").length;
               const percent = Math.round((approved / TOTAL) * 100);
               return (
                 <li key={project.id}>
@@ -79,7 +85,7 @@ export default async function HomePage() {
                         {project.status.replace("_", " ")}
                       </span>
                     </div>
-                    <StageStrip stages={stages} className="mt-4" />
+                    <StageStrip stages={strip} className="mt-4" />
                     <div className="mt-3 flex items-center justify-between text-xs text-[var(--text-muted)]">
                       <span>
                         {approved} / {TOTAL} approved

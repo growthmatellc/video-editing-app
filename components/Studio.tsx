@@ -14,7 +14,9 @@ import {
 import { statusColor, statusLabel, type StageStatus } from "@/lib/stage-ui";
 import { MarkdownView } from "@/components/MarkdownView";
 import { AppHeader } from "@/components/AppHeader";
+import { VideoEditStage } from "@/components/VideoEditStage";
 import type { AuditResult } from "@/lib/audit";
+import { readVideoEditMeta, type VideoEditRequest } from "@/lib/video-edit/types";
 
 export interface GateScore {
   passed: boolean;
@@ -47,6 +49,8 @@ interface Props {
   status: string;
   intakeText: string;
   initialStages: StudioStage[];
+  blobUploadEnabled: boolean;
+  transcriptionConfigured: boolean;
 }
 
 const TOTAL = WEBINAR_PIPELINE.length;
@@ -57,6 +61,8 @@ export function Studio({
   status,
   intakeText,
   initialStages,
+  blobUploadEnabled,
+  transcriptionConfigured,
 }: Props) {
   const [stages, setStages] = useState<StudioStage[]>(initialStages);
   const [selectedKey, setSelectedKey] = useState<string>(
@@ -80,12 +86,31 @@ export function Studio({
   const percent = Math.round((approvedCount / TOTAL) * 100);
 
   function patchStage(key: string, patch: Partial<StudioStage>) {
-    setStages((prev) =>
-      prev.map((s) => (s.stageKey === key ? { ...s, ...patch } : s)),
-    );
+    setStages((prev) => {
+      if (!prev.some((s) => s.stageKey === key)) {
+        const created: StudioStage = {
+          stageKey: key,
+          stageOrder: STAGE_BY_KEY[key]?.order ?? prev.length + 1,
+          status: "not_started",
+          outputMd: null,
+          outputMeta: null,
+          scoreJson: null,
+          auditJson: null,
+          gatePassed: false,
+          gateAttempts: 0,
+          ...patch,
+        };
+        return [...prev, created];
+      }
+      return prev.map((s) => (s.stageKey === key ? { ...s, ...patch } : s));
+    });
   }
 
-  async function runStage(kind: "run" | "reject", feedbackOverride?: string) {
+  async function runStage(
+    kind: "run" | "reject",
+    feedbackOverride?: string,
+    videoEdit?: VideoEditRequest,
+  ) {
     const fb = (feedbackOverride ?? feedback).trim();
     if (kind === "reject" && !fb) {
       setError("Add feedback before rejecting.");
@@ -104,7 +129,7 @@ export function Studio({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ feedback: fb || undefined }),
+          body: JSON.stringify({ feedback: fb || undefined, videoEdit }),
           signal: controller.signal,
         },
       );
@@ -118,6 +143,7 @@ export function Studio({
       patchStage(selectedKey, {
         status: data.status ?? "draft",
         outputMd: data.outputMd ?? null,
+        outputMeta: data.outputMeta !== undefined ? data.outputMeta : stage?.outputMeta ?? null,
         scoreJson: data.score ?? null,
         auditJson: data.audit ?? null,
         gatePassed: data.score?.passed ?? false,
@@ -300,7 +326,29 @@ export function Studio({
             </p>
           )}
 
+          {selectedKey === "video-edit" ? (
+            <VideoEditStage
+              key={readVideoEditMeta(stage?.outputMeta)?.outputs?.previewUrl ?? "draft"}
+              projectId={projectId}
+              stage={stage}
+              blobUploadEnabled={blobUploadEnabled}
+              transcriptionConfigured={transcriptionConfigured}
+              busy={busy}
+              feedback={feedback}
+              onFeedback={setFeedback}
+              onUploaded={(outputMeta) =>
+                patchStage("video-edit", { outputMeta, outputMd: null, status: "not_started" })
+              }
+              onRun={(videoEdit) => runStage("run", undefined, videoEdit)}
+              onReject={(videoEdit) => runStage("reject", undefined, videoEdit)}
+              onApprove={approve}
+              onHistory={loadRevisions}
+              showHistory={showRevisions}
+            />
+          ) : null}
+
           {/* Output */}
+          {selectedKey !== "video-edit" && (
           <div className="mt-5 rounded-[var(--radius)] border border-[var(--border)] bg-[var(--surface)] p-6 min-h-[200px]">
             {isIntake ? (
               <div className="prose-stage whitespace-pre-wrap">{intakeText || "(no intake)"}</div>
@@ -325,9 +373,10 @@ export function Studio({
               </p>
             )}
           </div>
+          )}
 
           {/* Controls */}
-          {runnable && !isIntake && (
+          {selectedKey !== "video-edit" && runnable && !isIntake && (
             <div className="mt-5 space-y-3">
               <textarea
                 value={feedback}
